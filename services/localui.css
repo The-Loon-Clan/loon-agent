@@ -1,0 +1,237 @@
+/* indexer-agent local UI stylesheet — served by //go:embed from
+   localui_assets.go. Consumes the shared design tokens from
+   /_shared/tokens.css (must be loaded before this file).
+   Agent-only layout and components live here; anything cross-surface
+   (palette, typography, rhythm) belongs in tokens.css. */
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font: 14px/1.5 'Inter', system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  display: flex;
+  min-height: 100vh;
+}
+/* Match the site's heavy-weight tight-tracking heading treatment. */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+}
+
+/* ── Sidebar ──────────────────────────────────────────────── */
+.sidebar {
+  width: 260px;
+  min-width: 260px;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 16px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+/* Brand wordmark: same treatment the site's .navbar-brand uses —
+   Ubuntu, heavy, blue, tight tracking — so the two UIs read as one
+   product. The "agent" subtitle below keeps it clear which instance
+   you're looking at without bringing in a second brand identity. */
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.brand .wordmark {
+  color: var(--blue);
+  font-family: 'Ubuntu', system-ui, -apple-system, sans-serif;
+  font-weight: 700;
+  font-size: 1.25rem;
+  line-height: 1.25;
+  letter-spacing: -0.05em;
+  text-decoration: none;
+  transition: color 150ms ease;
+}
+.brand .wordmark:hover { color: var(--blue-hover); }
+.brand .subtitle {
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* .card / .card-head / .status-row / .disk-bar-* / .speed-row /
+   .speed-graph moved to agent-shell.css (scoped under .local-shell,
+   which the sidebar element opts into). .dot lives in components.css.
+   If the template adds new classes that read identically on both
+   surfaces, put them in agent-shell.css rather than here. */
+
+.nav-group { display: flex; flex-direction: column; }
+.nav-group .head {
+  color: var(--text-muted); text-transform: uppercase;
+  letter-spacing: 0.08em; font-size: 10.5px; font-weight: 600;
+  padding: 4px 8px; margin-top: 4px;
+}
+.nav-group a {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 7px 10px; color: var(--text-muted); text-decoration: none;
+  border-radius: 4px; font-size: 13px;
+}
+.nav-group a:hover { color: var(--text-primary); background: var(--bg-hover); }
+.nav-group a.active { color: var(--text-primary); background: var(--blue-dim); }
+/* External link (e.g. to the site dashboard) gets a subtle separator
+   above it and a softer color so it reads as "leave this UI" rather
+   than "another local page." */
+.nav-group a.external { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 10px; color: var(--text-muted); }
+.nav-group a.external:hover { color: var(--blue); background: transparent; }
+.nav-group a.external .external-arrow { color: var(--text-muted); font-size: 11px; }
+.nav-group a .count {
+  color: var(--text-primary);
+  background: var(--blue-dim);
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  min-width: 16px;
+  text-align: center;
+}
+.nav-group a .count:empty { display: none; }
+
+.sidebar .footer {
+  margin-top: auto;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Main column ──────────────────────────────────────────── */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.topbar {
+  height: 48px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  background: var(--bg-surface);
+  gap: 16px;
+  position: sticky; top: 0; z-index: 10;
+}
+.topbar h1 { margin: 0; font-size: 15px; font-weight: 600; }
+.topbar .spacer { flex: 1; }
+.topbar .btn { padding: 5px 12px; }
+
+.content { padding: 20px; flex: 1; }
+.content p.lead { color: var(--text-muted); margin-top: 0; }
+
+/* ── Controls ─────────────────────────────────────────────── */
+input, textarea, select, button {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 9px;
+  font: inherit;
+}
+input:focus, textarea:focus, select:focus { outline: none; border-color: var(--blue); }
+textarea { min-height: 4em; width: 100%; resize: vertical; }
+button { cursor: pointer; }
+button:hover { border-color: var(--blue); }
+button.primary  { background: var(--blue-dim); border-color: var(--blue); }
+button.primary:hover { background: var(--blue); color: #fff; }
+button.danger   { background: #3a1f1f; border-color: #6a2c2c; }
+button.danger:hover { background: #5a2828; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+th { color: var(--text-muted); font-weight: 500; text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.06em; }
+tr:hover td { background: var(--bg-hover); }
+
+code { background: var(--bg-elevated); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+
+/* Badges — match the site's .badge.bg-success / .bg-danger pattern
+   (tinted bg at 0.15, 1px border at 0.3, rounded pill). RGBA values
+   use the shared palette: green=rgb(34,197,94), red=rgb(239,68,68),
+   blue=rgb(91,138,245), warn=rgb(245,158,11). */
+.badge {
+  display: inline-block;
+  padding: 0.2em 0.65em;
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 20px;
+  background: var(--border);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.badge.ok      { background: rgba(34, 197, 94, 0.15);  color: var(--green); border-color: rgba(34, 197, 94, 0.3); }
+.badge.err     { background: rgba(239, 68, 68, 0.15);  color: var(--red);   border-color: rgba(239, 68, 68, 0.3); }
+.badge.warn    { background: rgba(245, 158, 11, 0.15); color: var(--warn);  border-color: rgba(245, 158, 11, 0.3); }
+.badge.yml     { background: rgba(91, 138, 245, 0.15); color: var(--blue);  border-color: rgba(91, 138, 245, 0.3); }
+.badge.env     { background: rgba(245, 158, 11, 0.12); color: var(--warn);  border-color: rgba(245, 158, 11, 0.25); }
+.badge.local   { background: rgba(34, 197, 94, 0.1);   color: var(--green); border-color: rgba(34, 197, 94, 0.25); }
+.badge.site    { background: rgba(91, 138, 245, 0.12); color: var(--blue);  border-color: rgba(91, 138, 245, 0.25); }
+.badge.default { background: var(--border); color: var(--text-muted); }
+
+/* .alert / .alert-success / .alert-danger moved to components.css. */
+
+.small { color: var(--text-muted); font-size: 11.5px; }
+
+.row-form { display: contents; } /* forms in table rows don't disrupt layout */
+
+/* ─── Top-level mode tabs ──────────────────────────────────────────
+   Three exclusive entry points (Mirror / Offers / Collection) above
+   the topbar on every page. Only one is lit at a time. The strip
+   sits between the main column's left edge and the topbar; the gap
+   below it is intentional so the topbar still reads as a header
+   rather than a third row of tabs. */
+.mode-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 14px 24px 0 24px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+.mode-tab {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 8px 14px 10px 14px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  text-decoration: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: transparent;
+  transition: color 0.12s, background-color 0.12s;
+  position: relative;
+  top: 1px;
+}
+.mode-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+.mode-tab.is-active {
+  color: var(--blue);
+  background: var(--bg-base);
+  border-color: var(--border);
+}
+.mode-tab-sub {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--text-muted);
+  text-transform: lowercase;
+  letter-spacing: 0.01em;
+}

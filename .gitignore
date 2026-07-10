@@ -1,0 +1,10 @@
+*.exe
+*.test
+*.out
+vendor/
+dist/*
+!dist/README.md
+data/temp/
+.env
+go.work
+go.work.sum

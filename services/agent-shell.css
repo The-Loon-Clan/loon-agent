@@ -1,0 +1,154 @@
+/* Shared "agent shell" component primitives — used by both the site
+   (loaded directly from /static/css/agent-shell.css on the agent
+   dashboard page) and the agent's local UI (vendored at
+   indexer-agent/services/agent-shell.css, served at
+   /_shared/agent-shell.css via //go:embed). Keep the two copies
+   byte-identical; the agent doesn't share a filesystem with the site
+   so we literally copy on change.
+
+   Scope: every rule is nested under .local-shell so it only applies
+   inside an opted-in wrapper. That keeps the cards/dots/badges from
+   colliding with Bootstrap's .card on the rest of the site, while
+   letting the agent (no Bootstrap) just put .local-shell on the
+   <body> and have everything Just Work.
+
+   Depends on the palette tokens from tokens.css; load that first. */
+
+/* ── Card ────────────────────────────────────────────────────
+   A small surface with a single muted-uppercase header. Used for
+   the four sidebar/strip cards (Agent, Throughput, Disk, Nav)
+   and for any in-content panels we want to feel "agent native"
+   rather than "Bootstrap card." */
+.local-shell .card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+}
+.local-shell .card-head {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10.5px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+/* Two-column key/value row inside a card. Tabular-nums on the
+   value column so changing speeds/sizes don't make the column
+   shift width on every SSE tick. */
+.local-shell .status-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+}
+.local-shell .status-row .k { color: var(--text-muted); }
+.local-shell .status-row .v { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
+/* Disk usage bar — track is muted so the thin fill reads as data,
+   not decoration. Colors escalate past 85% and 95% to nudge the
+   operator before the drive actually fills. */
+.local-shell .disk-bar-track {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.local-shell .disk-bar-fill {
+  height: 100%;
+  background: var(--blue);
+  transition: width 250ms ease, background 150ms ease;
+}
+.local-shell .disk-bar-fill.warn   { background: var(--warn); }
+.local-shell .disk-bar-fill.danger { background: var(--red); }
+
+/* Throughput row: ↓/↑ pair with units. Fixed-width nums so the
+   speed graph's x-axis stays visually aligned with the digits.
+   nowrap + min-width 0 on the children stops the second span from
+   wrapping below the first when the card is narrow (the site lays
+   four of these out in a 4-column grid, so each card can be ~280px
+   on a 1200px container). */
+.local-shell .speed-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+.local-shell .speed-row > span {
+  white-space: nowrap;
+  min-width: 0;
+}
+.local-shell .speed-row .down { color: var(--green); }
+.local-shell .speed-row .up   { color: var(--blue); }
+.local-shell .speed-row .num  { font-weight: 600; font-variant-numeric: tabular-nums; }
+.local-shell .speed-row .unit { color: var(--text-muted); font-size: 11px; margin-left: 2px; }
+
+.local-shell .speed-graph {
+  width: 100%;
+  height: 40px;
+  margin-top: 6px;
+  stroke: var(--blue);
+  fill: none;
+  stroke-width: 1;
+}
+
+/* ── Top status strip (site only) ────────────────────────────
+   The site lays the four shell cards out as a horizontal strip
+   below the navbar+account-tabs, instead of stacking them in a
+   left sidebar like the agent local UI does. Same cards, same
+   classes — different container. The agent's localui.css owns
+   the sidebar layout; this strip owns the site layout. */
+.local-shell-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.local-shell-strip > .card { min-width: 0; }
+@media (max-width: 768px) {
+  .local-shell-strip { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── Tab nav (site uses; mirrors the local UI sidebar's
+   "Navigate" group visually). A row of muted-text links with
+   a single colored underline on the active one — denser than
+   Bootstrap's nav-tabs, matches the local UI's typography. */
+.local-shell-nav {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.local-shell-nav a {
+  padding: 8px 14px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 13px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.local-shell-nav a:hover { color: var(--text-primary); }
+.local-shell-nav a.active {
+  color: var(--blue);
+  border-bottom-color: var(--blue);
+  font-weight: 500;
+}
+.local-shell-nav .count {
+  display: inline-block;
+  background: var(--blue-dim);
+  color: var(--text-primary);
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+/* ── Tab panes (site uses). Named local-shell-pane (not the
+   Bootstrap-collision-prone "tab-pane") so we don't fight the
+   Bootstrap tab JS that the rest of the site uses elsewhere. */
+.local-shell-pane { display: none; }
+.local-shell-pane.active { display: block; }

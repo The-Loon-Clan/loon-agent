@@ -1,0 +1,58 @@
+/* Shared component primitives — used by both the site (via theme.css
+   @import) and the agent's local UI (vendored at
+   indexer-agent/services/components.css, served through //go:embed).
+   Keep the two copies byte-identical; the agent doesn't share a
+   filesystem with the site so we literally copy on change.
+
+   Scope: small, self-contained primitives that read identically on
+   both surfaces. Larger components (site nav, agent sidebar) stay
+   in their respective per-surface stylesheets.
+
+   Depends on the palette tokens from tokens.css; load that first. */
+
+/* ─── Status dot ──────────────────────────────────────────────
+   Tiny colored circle with a soft glow, for state indicators
+   ("VPN connected", "agent online"). The suffix names mirror
+   Bootstrap's alert/button suffix convention so the two class
+   systems don't fight each other on the site. */
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+  background: var(--text-muted);
+}
+.dot-success { background: var(--green); box-shadow: 0 0 6px rgba(34, 197, 94, 0.5); }
+.dot-danger  { background: var(--red);   box-shadow: 0 0 6px rgba(239, 68, 68, 0.5); }
+.dot-warning { background: var(--warn);  box-shadow: 0 0 6px rgba(245, 158, 11, 0.5); }
+
+/* ─── Alert banner ────────────────────────────────────────────
+   Tinted-bg / translucent-border banner for flash messages.
+   Matches the Bootstrap 5 .alert / .alert-danger naming so the
+   site's existing .alert-danger usage (see admin forms) keeps
+   working without changes — we just stop duplicating the rules
+   in theme.css. */
+.alert {
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+.alert-success {
+  background-color: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.3);
+  color: var(--green);
+}
+.alert-danger {
+  background-color: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+.alert-warning {
+  background-color: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.3);
+  color: var(--warn);
+}

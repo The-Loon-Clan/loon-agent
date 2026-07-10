@@ -1,0 +1,148 @@
+services:
+  vpn:
+    image: qmcgaw/gluetun
+    container_name: agent-vpn
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      # VPN provider config — see https://github.com/qdm12/gluetun-wiki/tree/main/setup/providers
+      - VPN_SERVICE_PROVIDER=${VPN_PROVIDER:?Set VPN_PROVIDER in .env}
+      - VPN_TYPE=${VPN_TYPE:-openvpn}
+      - OPENVPN_USER=${VPN_USER:?Set VPN_USER in .env}
+      - OPENVPN_PASSWORD=${VPN_PASS:?Set VPN_PASS in .env}
+      - SERVER_COUNTRIES=${VPN_COUNTRY:-Netherlands}
+      # SOCKS5 proxy for split-tunnel mode (VPN_DOWNLOAD_ONLY=true).
+      # The agent connects to vpn:1080 for torrent traffic only.
+      - SOCKS5=on
+      - SOCKS5_LISTENING_ADDRESS=:1080
+      # Gluetun HTTP control server (default :8000). The watchdog hits this
+      # on 127.0.0.1:8000 from the shared netns when the site has been
+      # unreachable for a while — no need to publish it to the host.
+      - HTTP_CONTROL_SERVER_ADDRESS=:8000
+      # Allow DNS lookups to Docker's embedded resolver. Containers sharing
+      # this netns (i.e. the agent below) get /etc/resolv.conf pointing at
+      # 127.0.0.11 by default; without this, gluetun's firewall blocks
+      # outbound UDP to 127.0.0.11:53 with "operation not permitted" and
+      # every site/NNTP/tracker hostname fails to resolve. The DNS query
+      # itself then forwards through Docker's configured upstream, which
+      # still originates from gluetun's tunnel — no leak.
+      - FIREWALL_OUTBOUND_SUBNETS=127.0.0.11/32
+    ports:
+      # Agent's local config UI. The agent runs in this netns (network_mode:
+      # service:vpn on the agent service), so its listen ports are actually
+      # owned by this container. Bound to 127.0.0.1 on the host so LAN peers
+      # can't edit config/secrets; change the host side if you want remote
+      # access (and put a reverse proxy with auth in front of it).
+      - "127.0.0.1:${LOCAL_UI_PORT:-4869}:${LOCAL_UI_PORT:-4869}"
+    restart: unless-stopped
+
+  agent:
+    build: .
+    image: usenet-pipeline:latest
+    container_name: indexer-agent
+    # VPN routing mode:
+    #
+    #   VPN_DOWNLOAD_ONLY=false (default, RECOMMENDED): ALL traffic
+    #     through gluetun's tunnel via network_mode: service:vpn.
+    #     Kill-switch enforced: if the tunnel drops, traffic blocks.
+    #     This is the only mode that gives FULL VPN protection for
+    #     peer-to-peer connections.
+    #
+    #   VPN_DOWNLOAD_ONLY=true (split-tunnel): the agent runs on
+    #     default networking; only HTTP tracker traffic routes
+    #     through the SOCKS5 proxy at vpn:1080. NNTP uploads go
+    #     direct for full upload speed.
+    #     ⚠ LIMITATION: anacrolix's peer-to-peer TCP connections
+    #       (where the actual torrent BYTES flow) CANNOT be routed
+    #       through SOCKS5 from clientConfig — they bypass the proxy
+    #       and use the agent container's default interface. Peers
+    #       in the swarm see your REAL IP. The startup log line
+    #       now states this honestly. Use this mode only if you
+    #       have a separate kernel-level routing rule for peer
+    #       traffic; otherwise pick the default full-tunnel mode.
+    network_mode: "${AGENT_NETWORK_MODE:-service:vpn}"
+    depends_on:
+      - vpn
+    environment:
+      # Site connection
+      - SITE_URL=${SITE_URL:?Set SITE_URL in .env}
+      - AGENT_TOKEN=${AGENT_TOKEN:?Set AGENT_TOKEN in .env}
+      - POLL_INTERVAL=${POLL_INTERVAL:-30}
+      # Directories
+      - TEMP_DIR=/data/temp
+      # Agent mode:
+      #   internal     (default) — agent runs its own torrent client; needs no
+      #                  external infrastructure beyond VPN credentials.
+      #   watch_folder — agent hands off the torrent to a user-supplied BT
+      #                  client by writing <info_hash>.torrent or .magnet to
+      #                  WATCH_DIR, then waits for DONE_DIR/<info_hash>/ to
+      #                  appear (i.e. user's client finished downloading).
+      #                  Uncomment WATCH_DIR / DONE_DIR mounts below.
+      - AGENT_MODE=${AGENT_MODE:-internal}
+      - WATCH_DIR=${WATCH_DIR:-/data/watch}
+      - DONE_DIR=${DONE_DIR:-/data/done}
+      - WATCH_HANDOFF_TIMEOUT_MIN=${WATCH_HANDOFF_TIMEOUT_MIN:-360}
+      # VPN split-tunnel — set VPN_DOWNLOAD_ONLY=true to route only torrents through VPN
+      - VPN_DOWNLOAD_ONLY=${VPN_DOWNLOAD_ONLY:-false}
+      - VPN_PROXY_ADDR=${VPN_PROXY_ADDR:-vpn:1080}
+      # NNTP / Usenet upload
+      - NNTP_SERVER=${NNTP_SERVER:?Set NNTP_SERVER in .env}
+      - NNTP_SSL=${NNTP_SSL:-true}
+      - NNTP_CONNECTIONS=${NNTP_CONNECTIONS:-10}
+      - NNTP_USER=${NNTP_USER:?Set NNTP_USER in .env}
+      - NNTP_PASS=${NNTP_PASS:?Set NNTP_PASS in .env}
+      - NNTP_GROUP=${NNTP_GROUP:-alt.binaries.multimedia.anime.highspeed}
+      - NNTP_POSTER=${NNTP_POSTER:-agent <agent@your-domain.com>}
+      - NNTP_FROM=${NNTP_FROM:-agent@your-domain.com}
+      - NNTP_DOMAIN=${NNTP_DOMAIN:-your-domain.com}
+      # Branding
+      - GENERATOR_NAME=${GENERATOR_NAME:-usenet-pipeline}
+      # Processing
+      - ENCRYPT=${ENCRYPT:-true}
+      - PAR2_REDUNDANCY=${PAR2_REDUNDANCY:-5}
+      # Local config UI. Must bind 0.0.0.0 inside the container so the host
+      # port mapping on the vpn service above can reach it — binding 127.0.0.1
+      # inside docker would be unreachable from the host even with -p.
+      - LOCAL_UI_PORT=${LOCAL_UI_PORT:-4869}
+      - LOCAL_UI_BIND=0.0.0.0
+      # Collection mode root — the in-container path the scanner
+      # walks. Match this to the volume mount below. Read-only is
+      # the safe default (Collection only reads files; the upload
+      # pass posts to usenet, never modifies the originals).
+      - COLLECTION_ROOT=${COLLECTION_ROOT:-/data/collection}
+      # Offline NZB output directory — where the agent writes the
+      # finished .nzb files after running a watch-folder or
+      # Collection-mode job through the pipeline. The path lives
+      # inside /data by default so the named agent_data volume
+      # catches it; uncomment the bind mount below if you want the
+      # NZBs to land directly on your host filesystem for syncing
+      # to another tool / a *arr stack / a backup script.
+      - OFFLINE_OUTPUT_DIR=${OFFLINE_OUTPUT_DIR:-/data/offline-output}
+    volumes:
+      - agent_data:/data
+      # WATCH_DIR / DONE_DIR for AGENT_MODE=watch_folder. Uncomment and
+      # point at whatever the user's BT client reads/writes — local
+      # paths, SMB/NFS mounts, or even FTP/WebDAV mounted locally via
+      # curlftpfs/davfs2. The agent doesn't care how the filesystem is
+      # implemented as long as it can read/write through the bind mount.
+      # - ${WATCH_HOST_DIR:-./watch}:/data/watch
+      # - ${DONE_HOST_DIR:-./done}:/data/done
+      # Collection mode source library — the host folder you want the
+      # agent to scan + upload from. Uncomment and set COLLECTION_HOST_DIR
+      # in your .env (e.g. COLLECTION_HOST_DIR=D:\Media\Anime on Windows,
+      # /mnt/library on Linux). The :ro suffix mounts read-only so a bug
+      # in Collection mode can't damage your source files.
+      # - ${COLLECTION_HOST_DIR}:/data/collection:ro
+      # Offline NZB output — the agent's finished .nzb files. Uncomment
+      # and set OFFLINE_OUTPUT_HOST_DIR in your .env if you want them
+      # written to a host path (e.g. for an *arr / Sonarr / Radarr
+      # blackhole, an SMB share, or your own backup tooling) instead of
+      # living inside the agent_data named volume. NO :ro here — the
+      # agent must be able to write.
+      # - ${OFFLINE_OUTPUT_HOST_DIR}:/data/offline-output
+    restart: unless-stopped
+
+volumes:
+  agent_data:

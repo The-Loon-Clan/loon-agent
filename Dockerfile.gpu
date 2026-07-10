@@ -1,0 +1,111 @@
+# indexer-agent GPU variant.
+#
+# Superset of the CPU Dockerfile: everything the CPU image can do PLUS
+# ncnn-vulkan-backed AI upscaling (services.RunUpscale + the model
+# registry in services/upscale_models.go). The base swaps from
+# node:22-alpine to nvidia/cuda runtime so the NVIDIA driver's Vulkan
+# ICD passes through and ffmpeg / par2 / mkvtoolnix / chromaprint /
+# tesseract / 7zip / unrar all stay available.
+#
+# Operator runs this with: nvidia-container-toolkit installed on the
+# host, plus `--gpus all` (or compose `deploy.resources.reservations.
+# devices`) to expose the GPU. Without those, exec.LookPath finds the
+# upscaler binaries but every job fails at GPU init — services.
+# RunUpscale logs and continues, the source uploads unchanged.
+#
+# amd64 only: ncnn-vulkan upscaler binaries don't ship arm64 builds.
+# (The CPU image keeps its multi-arch manifest unchanged.)
+
+# Stage 1: Build the Go application — same as CPU.
+FROM golang:1.25-alpine AS builder
+RUN apk add --no-cache git || true
+WORKDIR /app
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -o indexer ./cmd/agent
+
+# Stage 2: Build parpar — same as CPU.
+FROM node:22-alpine AS parpar-builder
+RUN apk add --no-cache python3 make g++ && \
+    npm install -g @animetosho/parpar && \
+    npm cache clean --force && \
+    parpar --version
+
+# Stage 3: Runtime — CUDA 12.4 on Ubuntu 22.04. The pinned tag avoids
+# silent base-image churn breaking the build; bump deliberately.
+FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
+
+# NVIDIA Container Toolkit passes the host driver's Vulkan ICD only when
+# the `graphics` capability is requested; without it ncnn-vulkan can't
+# create a Vulkan instance even with the GPU visible.
+ENV NVIDIA_DRIVER_CAPABILITIES=graphics,compute,utility
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV DEBIAN_FRONTEND=noninteractive
+
+# UTF-8 locale so spawned binaries (mediainfo / ffmpeg / mkvmerge / 7z /
+# par2 / chromaprint / tesseract / ncnn-vulkan upscalers) handle non-ASCII
+# filenames + paths (Chinese, Japanese, accented characters) correctly.
+# The default POSIX locale causes mediainfo to silently skip multibyte-
+# named files and ffmpeg to corrupt path output. C.UTF-8 is built into
+# glibc 2.35+ on Ubuntu 22.04, so no `locales` apt install is needed.
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
+# Same toolset as the CPU image, translated to apt names:
+#   ffmpeg + par2cmdline + mkvtoolnix + p7zip-full + unrar + chromaprint
+#   + tesseract (eng/jpn for manga OCR) + libvulkan1 (loader; NVIDIA ICD
+#   comes via the driver) + nodejs (for parpar) + curl/unzip (upscaler
+#   downloads at build time).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl unzip xz-utils \
+        ffmpeg par2 mkvtoolnix \
+        p7zip-full unrar \
+        chromaprint-tools \
+        tesseract-ocr tesseract-ocr-eng tesseract-ocr-jpn \
+        libvulkan1 \
+        nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+# parpar: copy the node_modules tree out of the parpar-builder so the
+# native addon's NODE_MODULE_VERSION matches its runtime. The CPU image
+# colocates them on node:22-alpine; here we use the host's nodejs apt
+# package — same major version (node 22 on Ubuntu 22.04 LTS via the
+# default repo or NodeSource if needed).
+COPY --from=parpar-builder /usr/local/lib/node_modules/@animetosho /usr/local/lib/node_modules/@animetosho
+RUN ln -sf /usr/local/lib/node_modules/@animetosho/parpar/bin/parpar.js /usr/local/bin/parpar
+
+# ncnn-vulkan upscaler binaries + models. Both projects ship a single
+# zip per release containing the binary plus its `models/` (Real-ESRGAN)
+# or `models-*` (RealCUGAN) directories — the binary auto-discovers
+# models in its own directory, so installing each tool under /opt and
+# adding the dir to PATH is enough.
+#
+# Pinned release URLs (bump deliberately when a new model wins):
+#   Real-ESRGAN ncnn-vulkan: github.com/xinntao/Real-ESRGAN
+#   RealCUGAN  ncnn-vulkan:  github.com/nihui/realcugan-ncnn-vulkan
+RUN mkdir -p /opt/realesrgan /opt/realcugan && \
+    curl -fsSL -o /tmp/realesrgan.zip \
+        https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-ubuntu.zip && \
+    unzip -q /tmp/realesrgan.zip -d /opt/realesrgan && \
+    rm /tmp/realesrgan.zip && \
+    curl -fsSL -o /tmp/realcugan.zip \
+        https://github.com/nihui/realcugan-ncnn-vulkan/releases/download/20220728/realcugan-ncnn-vulkan-20220728-ubuntu.zip && \
+    unzip -q /tmp/realcugan.zip -d /opt/realcugan && \
+    rm /tmp/realcugan.zip && \
+    chmod +x /opt/realesrgan/realesrgan-ncnn-vulkan /opt/realcugan/realcugan-ncnn-vulkan
+
+# Put both upscaler dirs on PATH so:
+#   1. exec.LookPath in services.AvailableUpscaleModels finds the binary
+#      (which lights up the registry advertising on this agent).
+#   2. The binary resolves its bundled models relatively (each looks in
+#      its own directory) when invoked by services.RunUpscale.
+ENV PATH=/opt/realesrgan:/opt/realcugan:$PATH
+
+# Smoke-test the upscalers at build time. Output goes to build log only;
+# any failure here means the URLs/binaries changed and the registry
+# advertising will lie at runtime — catch it now.
+RUN realesrgan-ncnn-vulkan -h 2>&1 | head -3 || true && \
+    realcugan-ncnn-vulkan  -h 2>&1 | head -3 || true
+
+WORKDIR /app
+COPY --from=builder /app/indexer .
+CMD ["./indexer"]

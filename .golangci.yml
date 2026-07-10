@@ -1,0 +1,26 @@
+# Mirror of indexer-site/.golangci.yml. Kept in sync manually — the
+# two modules are separate go modules so a single repo-root config
+# wouldn't apply cleanly to both.
+
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - govet
+    - ineffassign
+    - unused
+    - misspell
+  settings:
+    govet:
+      enable:
+        - shadow
+      disable:
+        - fieldalignment
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
