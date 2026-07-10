@@ -247,3 +247,83 @@ func TestCountUploadableBytes_ExcludesAgentArtifacts(t *testing.T) {
 	}
 }
 
+// TestUploadAllowlist_RejectsCrashDumpAndStrays is the regression guard
+// for the credential-leak incident: a `core.<pid>` crash dump (full
+// process memory — NNTP password, agent token) was walked into a
+// Usenet upload alongside the media. The upload stage is now a
+// default-deny allowlist; this pins that crash dumps and other stray
+// non-content files never stage, while legitimate media and
+// split-archive parts do.
+func TestUploadAllowlist_RejectsCrashDumpAndStrays(t *testing.T) {
+	src := t.TempDir()
+	dst := t.TempDir()
+
+	// Legitimate content — must stage.
+	writeSparse(t, filepath.Join(src, "movie.mkv"), 4_000_000)
+	writeSparse(t, filepath.Join(src, "movie.nfo"), 1_000)
+	writeSparse(t, filepath.Join(src, "cover.jpg"), 50_000)
+	writeSparse(t, filepath.Join(src, "pack.001"), 2_000_000) // split archive part
+	writeSparse(t, filepath.Join(src, "pack.r00"), 2_000_000) // rar volume
+
+	// Strays that a denylist would have missed — must NOT stage.
+	writeSparse(t, filepath.Join(src, "core.33378"), 8_000_000) // the incident
+	writeSparse(t, filepath.Join(src, "core"), 8_000_000)       // dump with no pid suffix
+	writeSparse(t, filepath.Join(src, "agent.log"), 10_000)
+	writeSparse(t, filepath.Join(src, "state.db"), 10_000)
+	writeSparse(t, filepath.Join(src, ".env"), 500)
+
+	if err := CopyFiles(context.Background(), src, dst); err != nil {
+		t.Fatalf("CopyFiles: %v", err)
+	}
+
+	mustStage := []string{"movie.mkv", "movie.nfo", "cover.jpg", "pack.001", "pack.r00"}
+	for _, name := range mustStage {
+		if _, err := os.Stat(filepath.Join(dst, name)); err != nil {
+			t.Errorf("expected %s to stage, but it is absent: %v", name, err)
+		}
+	}
+	mustReject := []string{"core.33378", "core", "agent.log", "state.db", ".env"}
+	for _, name := range mustReject {
+		if _, err := os.Stat(filepath.Join(dst, name)); !os.IsNotExist(err) {
+			t.Errorf("SECURITY: %s must NOT stage for upload (stat err = %v)", name, err)
+		}
+	}
+
+	// The parity counter must agree — only the five content files.
+	c, err := countStagedFiles(src)
+	if err != nil {
+		t.Fatalf("countStagedFiles: %v", err)
+	}
+	if c.files != len(mustStage) {
+		t.Errorf("countStagedFiles counted %d uploadable files, want %d", c.files, len(mustStage))
+	}
+}
+
+// TestIsUploadableContent covers the extension decision in isolation,
+// including the split-archive vs crash-dump numeric-extension edge.
+func TestIsUploadableContent(t *testing.T) {
+	cases := map[string]bool{
+		"movie.mkv":        true,
+		"track.flac":       true,
+		"subs.srt":         true,
+		"cover.jpg":        true,
+		"release.nfo":      true,
+		"data.par2":        true,
+		"pack.001":         true, // 3-digit split part
+		"pack.999":         true,
+		"pack.r00":         true,  // rar volume
+		"core.33378":       false, // 5-digit — the incident
+		"core":             false, // no extension
+		"dump.4096":        false, // 4-digit numeric, not a split part
+		"agent.log":        false,
+		".torrent.bolt.db": false,
+		"state.db":         false,
+		".env":             false,
+		"noext":            false,
+	}
+	for name, want := range cases {
+		if got := isUploadableContent(name); got != want {
+			t.Errorf("isUploadableContent(%q) = %v, want %v", name, got, want)
+		}
+	}
+}

@@ -680,6 +680,12 @@ func runBackfill(site client.Site, tempDir string) {
 // ── Main ────────────────────────────────────────────────────────────────────
 
 func main() {
+	// SECURITY: kill core dumps before anything else runs. A dump is
+	// full process memory (NNTP password, agent token, env secrets);
+	// if one is ever written into a content tree the upload stage
+	// would post it to Usenet. See coredump_unix.go.
+	disableCoreDumps()
+
 	cfg := config.NewConfig()
 
 	if cfg.SiteURL == "" || cfg.AgentToken == "" {

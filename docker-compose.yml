@@ -142,6 +142,13 @@ services:
       # living inside the agent_data named volume. NO :ro here — the
       # agent must be able to write.
       # - ${OFFLINE_OUTPUT_HOST_DIR}:/data/offline-output
+    # SECURITY: hard-cap core dumps to zero at the container level, in
+    # addition to the RLIMIT_CORE=0 the agent sets in-process. A core
+    # dump is full process memory (NNTP password, agent token) and, if
+    # written into a content tree, would be posted to Usenet by the
+    # upload stage. Belt-and-suspenders with the in-process guard.
+    ulimits:
+      core: 0
     restart: unless-stopped
 
 volumes:

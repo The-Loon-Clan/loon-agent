@@ -65,9 +65,10 @@ var agentManagedDirs = map[string]bool{
 // real Usenet article alongside the .mkv set.
 //
 // Known artifacts as of anacrolix v1.x:
-//   .torrent.bolt.db        bolt-backed peer/piece state
-//   .torrent.db             alternate storage backend
-//   .torrent.bolt.db.lock   bolt lockfile
+//
+//	.torrent.bolt.db        bolt-backed peer/piece state
+//	.torrent.db             alternate storage backend
+//	.torrent.bolt.db.lock   bolt lockfile
 //
 // Matching the `.torrent.` prefix catches future variants too — anacrolix
 // has stuck to this convention across versions. Doesn't match a real
@@ -75,6 +76,73 @@ var agentManagedDirs = map[string]bool{
 // data dir would still upload normally.
 func isAgentManagedFile(name string) bool {
 	return strings.HasPrefix(name, ".torrent.")
+}
+
+// contentExts is the allowlist of file extensions the agent will post
+// to Usenet.
+//
+// This is default-DENY on purpose. The upload stage used to be a
+// denylist ("upload everything except these known-bad files"), and
+// that shape leaked three times: extracted _screenshots/_subtitles
+// (June 2026), the anacrolix .torrent.bolt.db state file, and finally
+// a `core.<pid>` crash dump that carried the NNTP password + agent
+// token onto Usenet in the clear. Every one was the same failure: an
+// unexpected file lands in the content tree and the denylist hasn't
+// learned to exclude it yet. An allowlist excludes all of them — and
+// every future stray — by construction. A file only ships if its
+// extension is a recognized content/packaging type or a split-archive
+// volume part; anything else (crash dumps, .db/.log/.lock, editor swap
+// files, sockets) is skipped and logged.
+var contentExts = map[string]bool{
+	// video
+	".mkv": true, ".mp4": true, ".m4v": true, ".avi": true, ".mov": true,
+	".wmv": true, ".flv": true, ".webm": true, ".mpg": true, ".mpeg": true,
+	".m2ts": true, ".ts": true, ".vob": true, ".iso": true, ".ogm": true,
+	// audio
+	".flac": true, ".mp3": true, ".m4a": true, ".m4b": true, ".aac": true,
+	".ac3": true, ".dts": true, ".wav": true, ".ogg": true, ".opus": true,
+	".alac": true, ".ape": true, ".wv": true, ".mka": true,
+	// subtitles
+	".srt": true, ".ass": true, ".ssa": true, ".sub": true, ".idx": true,
+	".vtt": true, ".sup": true, ".smi": true,
+	// images that ship with a release (cover/fanart)
+	".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".bmp": true, ".gif": true,
+	// release metadata + packaging
+	".nfo": true, ".sfv": true, ".md5": true, ".txt": true, ".cue": true,
+	".par2": true, ".rar": true, ".zip": true, ".7z": true,
+}
+
+// isSplitArchivePart reports whether ext (leading-dot, lowercased) is
+// a multi-volume archive part: a strictly-3-digit numeric extension
+// (foo.001..foo.999 — 7z/generic split) or an rNN rar volume
+// (foo.r00..foo.r99). The strict-3-digit rule is what distinguishes a
+// legitimate split part from a crash dump: `core.33378` has a 5-digit
+// extension and a bare `core` has none, so both fail here.
+func isSplitArchivePart(ext string) bool {
+	if len(ext) != 4 {
+		return false
+	}
+	d := func(b byte) bool { return b >= '0' && b <= '9' }
+	if d(ext[1]) && d(ext[2]) && d(ext[3]) {
+		return true // .001 .. .999
+	}
+	if ext[1] == 'r' && d(ext[2]) && d(ext[3]) {
+		return true // .r00 .. .r99
+	}
+	return false
+}
+
+// isUploadableContent is the single decision every upload-stage walk
+// consults (both walkers + the parity counter, kept symmetric so the
+// audit never false-flags). Default-deny: a file ships only if it is
+// not agent-internal and its extension is a known content type or a
+// split-archive part.
+func isUploadableContent(name string) bool {
+	if isAgentManagedFile(name) {
+		return false
+	}
+	ext := strings.ToLower(filepath.Ext(name))
+	return contentExts[ext] || isSplitArchivePart(ext)
 }
 
 // stageCounts is the result of walking a tree and tallying non-zero-byte
@@ -106,12 +174,12 @@ func CountUploadableBytes(root string) (int64, int, error) {
 // so the post-stage audit compares apples to apples.
 //
 // Skipping agentManagedDirs here matters for two reasons:
-//   1. Apples-to-apples with the source walk in CopyFiles / ObfuscateFiles
-//      which also skips them — without symmetry the audit would falsely
-//      detect a mismatch.
-//   2. If a future code path leaks _screenshots / _subtitles into the
-//      stage dir, this counter would silently absorb them into "bytes
-//      staged". Skipping at audit time keeps the metric honest.
+//  1. Apples-to-apples with the source walk in CopyFiles / ObfuscateFiles
+//     which also skips them — without symmetry the audit would falsely
+//     detect a mismatch.
+//  2. If a future code path leaks _screenshots / _subtitles into the
+//     stage dir, this counter would silently absorb them into "bytes
+//     staged". Skipping at audit time keeps the metric honest.
 func countStagedFiles(root string) (stageCounts, error) {
 	var c stageCounts
 	err := filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
@@ -124,7 +192,7 @@ func countStagedFiles(root string) (stageCounts, error) {
 			}
 			return nil
 		}
-		if fi.Size() == 0 || isAgentManagedFile(fi.Name()) {
+		if fi.Size() == 0 || !isUploadableContent(fi.Name()) {
 			return nil
 		}
 		c.files++
@@ -175,6 +243,10 @@ func ObfuscateFiles(ctx context.Context, src, dstDir string) error {
 			log.Printf("stage: skipping zero-byte file %s", src)
 			return nil
 		}
+		if !isUploadableContent(info.Name()) {
+			log.Printf("SECURITY: stage: refusing to upload non-content file %s (extension %q not on the upload allowlist)", src, ext)
+			return nil
+		}
 		dst := filepath.Join(dstDir, GenerateRandomPassword(12)+ext)
 		if err := copyFile(src, dst); err != nil {
 			return fmt.Errorf("stage: copy %q failed: %w", info.Name(), err)
@@ -204,8 +276,8 @@ func ObfuscateFiles(ctx context.Context, src, dstDir string) error {
 			log.Printf("stage: skipping zero-byte file %s", path)
 			return nil
 		}
-		if isAgentManagedFile(fi.Name()) {
-			log.Printf("stage: skipping anacrolix-internal file %s (site-only, not uploaded)", path)
+		if !isUploadableContent(fi.Name()) {
+			log.Printf("SECURITY: stage: refusing to upload non-content file %s (not on the upload allowlist)", path)
 			return nil
 		}
 		if ctx.Err() != nil {
@@ -255,6 +327,10 @@ func CopyFiles(ctx context.Context, src, dstDir string) error {
 			log.Printf("stage: skipping zero-byte file %s", src)
 			return nil
 		}
+		if !isUploadableContent(info.Name()) {
+			log.Printf("SECURITY: stage: refusing to upload non-content file %s (not on the upload allowlist)", src)
+			return nil
+		}
 		dst := filepath.Join(dstDir, info.Name())
 		if err := linkOrCopy(src, dst); err != nil {
 			return fmt.Errorf("stage: link/copy %q failed: %w", info.Name(), err)
@@ -284,8 +360,8 @@ func CopyFiles(ctx context.Context, src, dstDir string) error {
 			log.Printf("stage: skipping zero-byte file %s", path)
 			return nil
 		}
-		if isAgentManagedFile(fi.Name()) {
-			log.Printf("stage: skipping anacrolix-internal file %s (site-only, not uploaded)", path)
+		if !isUploadableContent(fi.Name()) {
+			log.Printf("SECURITY: stage: refusing to upload non-content file %s (not on the upload allowlist)", path)
 			return nil
 		}
 		if ctx.Err() != nil {
