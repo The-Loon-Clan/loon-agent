@@ -73,8 +73,10 @@ func EncryptWith7z(ctx context.Context, srcDir, destPath, password string) error
 	}
 	cmd := exec.CommandContext(ctx, "7z", args...)
 	cmd.Dir = srcDir
+	cmd.Env = toolEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		escalateToolCrash("7z", srcDir, out, err)
 		return fmt.Errorf("7z: %v: %s", err, out)
 	}
 	return nil

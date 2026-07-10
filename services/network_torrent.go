@@ -972,7 +972,12 @@ func downloadAndWaitSeed(ctx context.Context, cl *torrent.Client, t *torrent.Tor
 				// StallMins minutes of zero progress + zero speed drops too.
 				if so.RequireFull && completed == 0 && time.Since(startedAt) > 60*time.Second {
 					log.Printf("[%s] Rejecting: no full seed (0 bytes after 60s) — peak-peers=%d (swarm was %s)",
-						jobName, peakPeers, func() string { if peakPeers == 0 { return "completely dead" }; return "live but no full peer" }())
+						jobName, peakPeers, func() string {
+							if peakPeers == 0 {
+								return "completely dead"
+							}
+							return "live but no full peer"
+						}())
 					t.Drop()
 					cl.Close()
 					return nil, ErrSlowDownload

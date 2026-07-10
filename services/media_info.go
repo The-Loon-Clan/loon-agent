@@ -52,12 +52,12 @@ type VideoInfo struct {
 	MasterDisplayMinNits float64 `json:"master_display_min_nits,omitempty"` // mastering display floor
 	// DolbyVisionProfile is the DoVi profile (5, 7, 8, 10) when
 	// ffprobe reports a DOVI configuration record. 0 when absent.
-	DolbyVisionProfile  int `json:"dolby_vision_profile,omitempty"`
-	DolbyVisionLevel    int `json:"dolby_vision_level,omitempty"`
-	DolbyVisionRPU      bool `json:"dolby_vision_rpu,omitempty"`
-	DolbyVisionBL       bool `json:"dolby_vision_bl,omitempty"`
-	DolbyVisionEL       bool `json:"dolby_vision_el,omitempty"`
-	VideoBitrate   int64  `json:"video_bitrate"`
+	DolbyVisionProfile int   `json:"dolby_vision_profile,omitempty"`
+	DolbyVisionLevel   int   `json:"dolby_vision_level,omitempty"`
+	DolbyVisionRPU     bool  `json:"dolby_vision_rpu,omitempty"`
+	DolbyVisionBL      bool  `json:"dolby_vision_bl,omitempty"`
+	DolbyVisionEL      bool  `json:"dolby_vision_el,omitempty"`
+	VideoBitrate       int64 `json:"video_bitrate"`
 
 	// Audio tracks
 	AudioTracks []AudioTrack `json:"audio_tracks"`

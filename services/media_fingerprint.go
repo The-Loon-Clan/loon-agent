@@ -69,8 +69,10 @@ func FingerprintAudio(ctx context.Context, srcDir string) ([]AudioFingerprint, e
 // will want full-track matching for OP/ED detection later).
 func fpcalcOne(ctx context.Context, video string) (*AudioFingerprint, error) {
 	cmd := exec.CommandContext(ctx, "fpcalc", "-json", "-length", "0", video)
+	cmd.Env = toolEnv()
 	bytes, err := cmd.Output()
 	if err != nil {
+		escalateToolCrash("fpcalc", video, bytes, err)
 		return nil, err
 	}
 	var data fpcalcOutput

@@ -38,11 +38,11 @@ type mkvmergeJSON struct {
 		Codec      string `json:"codec"`    // human label e.g. "SubRip/SRT"
 		CodecID    string `json:"codec_id"` // technical id e.g. "S_TEXT/UTF8"
 		Properties struct {
-			Language       string `json:"language"`         // ISO 639-2
-			LanguageIETF   string `json:"language_ietf"`    // BCP-47 (often empty)
-			TrackName      string `json:"track_name"`
-			Forced         bool   `json:"forced_track"`
-			DefaultTrack   bool   `json:"default_track"`
+			Language     string `json:"language"`      // ISO 639-2
+			LanguageIETF string `json:"language_ietf"` // BCP-47 (often empty)
+			TrackName    string `json:"track_name"`
+			Forced       bool   `json:"forced_track"`
+			DefaultTrack bool   `json:"default_track"`
 		} `json:"properties"`
 	} `json:"tracks"`
 }
@@ -156,7 +156,9 @@ func ExtractSubtitles(ctx context.Context, srcDir, outDir string) ([]SubtitleTra
 			// mkvextract syntax: mkvextract tracks INPUT N:OUT
 			cmd := exec.CommandContext(ctx, "mkvextract", "tracks", v,
 				fmt.Sprintf("%d:%s", t.TrackIndex, dst))
+			cmd.Env = toolEnv()
 			if outBytes, err := cmd.CombinedOutput(); err != nil {
+				escalateToolCrash("mkvextract", v, outBytes, err)
 				log.Printf("subtitles: mkvextract %s track %d failed: %v\n  %s",
 					filepath.Base(v), t.TrackIndex, err, tailLines(string(outBytes), 2))
 				continue
@@ -181,8 +183,10 @@ func ExtractSubtitles(ctx context.Context, srcDir, outDir string) ([]SubtitleTra
 // the source.
 func probeSubtitleTracks(ctx context.Context, video string) ([]SubtitleTrack, error) {
 	cmd := exec.CommandContext(ctx, "mkvmerge", "-J", video)
+	cmd.Env = toolEnv()
 	outBytes, err := cmd.Output()
 	if err != nil {
+		escalateToolCrash("mkvmerge", video, outBytes, err)
 		return nil, err
 	}
 	var data mkvmergeJSON

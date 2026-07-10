@@ -771,6 +771,10 @@ func main() {
 	// overrides — see services.LocalUI.SetSite.
 	secrets := services.LoadSecrets()
 	site := client.New(cfg)
+	// Forward child-tool crashes (ffmpeg/par2/… signal kills) to the
+	// site's agent_logs so they're visible in the admin dashboard
+	// instead of only in container stdout. See services/exec_tool.go.
+	services.ToolFailureSink = func(level, message string) { _ = site.PostLog(level, message) }
 	localUI := services.StartLocalUI(cfg, secrets, db)
 	if localUI != nil {
 		localUI.SetSite(site)

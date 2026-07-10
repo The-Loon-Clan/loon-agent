@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
+	"github.com/ameNZB/usenet-pipeline/config"
 	"log"
 	"os"
 	"strings"
 	"time"
-	"github.com/ameNZB/usenet-pipeline/config"
 )
 
 // splitNNTPGroups turns a comma/space-separated newsgroup string into a

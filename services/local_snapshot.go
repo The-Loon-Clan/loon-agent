@@ -16,18 +16,18 @@ import (
 // the latest value on its own ~1.5s cadence; there's no coupling between
 // the producer and consumer rates.
 type LiveSnapshot struct {
-	Phase           string    `json:"phase"`                // idle | downloading | uploading | screenshots | par2 | ...
-	TaskTitle       string    `json:"task_title,omitempty"` // current task if any
-	DownloadMBps    float64   `json:"download_mbps"`        // aggregate across active tasks
-	UploadMBps      float64   `json:"upload_mbps"`          // total upload — kept for older clients
-	NzbUploadMBps   float64   `json:"nzb_upload_mbps"`      // NNTP POST traffic only
-	SeedUploadMBps  float64   `json:"seed_upload_mbps"`     // BitTorrent seed-back traffic only
-	VPNStatus       string    `json:"vpn_status"`
-	PublicIP        string    `json:"public_ip"`
-	DiskFreeGB      float64   `json:"disk_free_gb"`
-	DiskReservedGB  float64   `json:"disk_reserved_gb"`
-	DiskTotalGB     float64   `json:"disk_total_gb"` // 0 on stub platforms; sidebar hides the bar when 0
-	UpdatedAt       time.Time `json:"updated_at"`
+	Phase          string    `json:"phase"`                // idle | downloading | uploading | screenshots | par2 | ...
+	TaskTitle      string    `json:"task_title,omitempty"` // current task if any
+	DownloadMBps   float64   `json:"download_mbps"`        // aggregate across active tasks
+	UploadMBps     float64   `json:"upload_mbps"`          // total upload — kept for older clients
+	NzbUploadMBps  float64   `json:"nzb_upload_mbps"`      // NNTP POST traffic only
+	SeedUploadMBps float64   `json:"seed_upload_mbps"`     // BitTorrent seed-back traffic only
+	VPNStatus      string    `json:"vpn_status"`
+	PublicIP       string    `json:"public_ip"`
+	DiskFreeGB     float64   `json:"disk_free_gb"`
+	DiskReservedGB float64   `json:"disk_reserved_gb"`
+	DiskTotalGB    float64   `json:"disk_total_gb"` // 0 on stub platforms; sidebar hides the bar when 0
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 var (

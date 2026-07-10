@@ -36,12 +36,12 @@ import (
 // a "Match" badge vs an empty cell without inspecting AID directly,
 // and lets a later "Upload" pass quickly filter to confirmed rows.
 type CollectionItem struct {
-	Path           string    `json:"path"`             // absolute path on disk
-	RelPath        string    `json:"rel_path"`         // relative to scan root, for display
-	Filename       string    `json:"filename"`         // basename only
-	SizeBytes      int64     `json:"size_bytes"`
-	ModTime        time.Time `json:"mod_time"`
-	Ext            string    `json:"ext"`              // lowercase, without leading dot
+	Path      string    `json:"path"`     // absolute path on disk
+	RelPath   string    `json:"rel_path"` // relative to scan root, for display
+	Filename  string    `json:"filename"` // basename only
+	SizeBytes int64     `json:"size_bytes"`
+	ModTime   time.Time `json:"mod_time"`
+	Ext       string    `json:"ext"` // lowercase, without leading dot
 
 	// Enrichment results — copied from the site's bulk response.
 	Matched        bool   `json:"matched"`

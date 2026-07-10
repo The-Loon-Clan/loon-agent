@@ -71,10 +71,12 @@ func OCRMangaPages(ctx context.Context, pagePaths []string, language string) OCR
 // instead of creating <base>.txt next to the image.
 func tesseractOne(ctx context.Context, image, language string) (string, error) {
 	cmd := exec.CommandContext(ctx, "tesseract", image, "-", "-l", language, "--psm", "6")
+	cmd.Env = toolEnv()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		escalateToolCrash("tesseract", image, stderr.Bytes(), err)
 		return "", fmt.Errorf("%w: %s", err, tailLines(stderr.String(), 2))
 	}
 	return stdout.String(), nil

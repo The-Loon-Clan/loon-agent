@@ -176,7 +176,9 @@ func RunRemux(ctx context.Context, dir, remuxOption string) (*RemuxResult, error
 			"--no-attachments",
 			"-o", dst,
 			src)
+		cmd.Env = toolEnv()
 		if out, err := cmd.CombinedOutput(); err != nil {
+			escalateToolCrash("mkvmerge", src, out, err)
 			log.Printf("remux: mkvmerge failed on %s: %v\n%s", src, err, string(out))
 			// Skip this source rather than aborting the whole pass —
 			// other inputs may still produce useful output.

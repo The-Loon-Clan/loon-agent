@@ -79,7 +79,7 @@ func (n *nyaaScraper) ShortName() string { return NyaaShortName }
 // resolves the namespace via the prefix attribute so a plain
 // `Size string \`xml:"size"\`` (matching local name) is enough.
 type rssDoc struct {
-	XMLName xml.Name  `xml:"rss"`
+	XMLName xml.Name   `xml:"rss"`
 	Channel rssChannel `xml:"channel"`
 }
 
@@ -89,9 +89,9 @@ type rssChannel struct {
 
 type rssItem struct {
 	Title    string `xml:"title"`
-	Link     string `xml:"link"`           // /download/<id>.torrent
-	Size     string `xml:"size"`           // "1.4 GiB" — nyaa namespace
-	InfoHash string `xml:"infoHash"`       // 40 hex chars — nyaa namespace
+	Link     string `xml:"link"`     // /download/<id>.torrent
+	Size     string `xml:"size"`     // "1.4 GiB" — nyaa namespace
+	InfoHash string `xml:"infoHash"` // 40 hex chars — nyaa namespace
 	GUID     string `xml:"guid"`
 }
 

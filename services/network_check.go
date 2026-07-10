@@ -1,12 +1,12 @@
 package services
 
 import (
+	"github.com/ameNZB/usenet-pipeline/config"
+	"github.com/ameNZB/usenet-pipeline/storage"
 	"io"
 	"log"
 	"net/http"
 	"time"
-	"github.com/ameNZB/usenet-pipeline/config"
-	"github.com/ameNZB/usenet-pipeline/storage"
 )
 
 func MonitorNetworkConnection(cfg *config.Config) {

@@ -1428,11 +1428,11 @@ func (u *LocalUI) handleCollection(w http.ResponseWriter, r *http.Request) {
 type rootStatusKind string
 
 const (
-	rootStatusUnset       rootStatusKind = "unset"        // COLLECTION_ROOT empty
-	rootStatusMissing     rootStatusKind = "missing"      // path doesn't exist
-	rootStatusNotDir      rootStatusKind = "not_dir"      // exists but isn't a directory
-	rootStatusEmpty       rootStatusKind = "empty"        // dir exists but has no files (mount line probably not enabled)
-	rootStatusOK          rootStatusKind = "ok"           // dir exists and has entries — looks mounted
+	rootStatusUnset   rootStatusKind = "unset"   // COLLECTION_ROOT empty
+	rootStatusMissing rootStatusKind = "missing" // path doesn't exist
+	rootStatusNotDir  rootStatusKind = "not_dir" // exists but isn't a directory
+	rootStatusEmpty   rootStatusKind = "empty"   // dir exists but has no files (mount line probably not enabled)
+	rootStatusOK      rootStatusKind = "ok"      // dir exists and has entries — looks mounted
 )
 
 // rootStatus is the {kind + free-text detail + entry count} bundle

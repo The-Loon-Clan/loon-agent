@@ -95,7 +95,9 @@ func runConvert(ctx context.Context, dir, remuxOption string) (*RemuxResult, err
 			"-map_chapters", "0",
 			"-map", "0",
 			dst)
+		cmd.Env = toolEnv()
 		if out, err := cmd.CombinedOutput(); err != nil {
+			escalateToolCrash("ffmpeg", src, out, err)
 			log.Printf("convert: ffmpeg failed on %s: %v\n%s", src, err, tailLines(string(out), 6))
 			continue
 		}

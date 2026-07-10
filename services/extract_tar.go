@@ -149,6 +149,7 @@ func extractTarVia7z(ctx context.Context, archive, outDir string) error {
 		return fmt.Errorf("no 7z binary to decompress %s", filepath.Base(archive))
 	}
 	cmd := exec.CommandContext(ctx, sevenZipBinary, "x", "-so", archive)
+	cmd.Env = toolEnv()
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 	stdout, err := cmd.StdoutPipe()
@@ -167,6 +168,7 @@ func extractTarVia7z(ctx context.Context, archive, outDir string) error {
 		return extractErr
 	}
 	if waitErr != nil {
+		escalateToolCrash(sevenZipBinary, archive, errBuf.Bytes(), waitErr)
 		return fmt.Errorf("%s -so: %w\n%s", sevenZipBinary, waitErr, strings.TrimSpace(errBuf.String()))
 	}
 	return nil

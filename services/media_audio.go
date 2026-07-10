@@ -121,8 +121,10 @@ func probeAudioForVideo(ctx context.Context, video string) ([]AudioCatalogTrack,
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "mkvmerge", "-J", video)
+	cmd.Env = toolEnv()
 	outBytes, err := cmd.Output()
 	if err != nil {
+		escalateToolCrash("mkvmerge", video, outBytes, err)
 		return nil, err
 	}
 	var data mkvmergeAudioJSON

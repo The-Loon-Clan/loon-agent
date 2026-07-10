@@ -124,7 +124,9 @@ func upscaleOneCBZ(ctx context.Context, src, dst string, m UpscaleModel) error {
 			"-f", "png",
 		}, m.Args...)
 		upCmd := exec.CommandContext(ctx, m.Binary, upArgs...)
+		upCmd.Env = toolEnv()
 		if out, err := upCmd.CombinedOutput(); err != nil {
+			escalateToolCrash(m.Binary, src, out, err)
 			return fmt.Errorf("%s: %w\n%s", m.Binary, err, tailLines(string(out), 6))
 		}
 	}

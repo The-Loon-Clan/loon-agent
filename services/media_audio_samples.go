@@ -108,9 +108,11 @@ func GenerateAudioSamples(ctx context.Context, audioPath, outputDir string, dura
 				"-y",
 				outPath,
 			)
+			cmd.Env = toolEnv()
 			cmd.Stdout = nil
 			cmd.Stderr = nil
 			if err := cmd.Run(); err != nil {
+				escalateToolCrash("ffmpeg", audioPath, nil, err)
 				return
 			}
 			if info, err := os.Stat(outPath); err == nil && info.Size() > 0 {

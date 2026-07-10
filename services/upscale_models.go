@@ -125,9 +125,12 @@ func GPUCapabilities() (string, []string) {
 // driver is present. Best-effort: any error → "". Cheap enough to call
 // once at startup; do not call per-poll.
 func DetectGPU() string {
-	out, err := exec.Command("nvidia-smi",
-		"--query-gpu=name,memory.total", "--format=csv,noheader").Output()
+	cmd := exec.Command("nvidia-smi",
+		"--query-gpu=name,memory.total", "--format=csv,noheader")
+	cmd.Env = toolEnv()
+	out, err := cmd.Output()
 	if err != nil {
+		escalateToolCrash("nvidia-smi", "", out, err)
 		return ""
 	}
 	line := strings.TrimSpace(out2first(string(out)))

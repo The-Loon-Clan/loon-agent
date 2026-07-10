@@ -123,6 +123,7 @@ func GeneratePAR2(ctx context.Context, dir string, baseName string, opts PAR2Opt
 	wg.Wait()
 
 	if err != nil {
+		escalateToolCrash(par2Binary, dir, []byte(lastOutput.String()), err)
 		log.Printf("PAR2 output:\n%s", lastOutput.String())
 		return nil, fmt.Errorf("par2 create failed: %w", err)
 	}
@@ -166,6 +167,7 @@ func buildPar2createCmd(ctx context.Context, dir, baseName string, redundancy, b
 	args = append(args, files...)
 	cmd := exec.CommandContext(ctx, "par2create", args...)
 	cmd.Dir = dir
+	cmd.Env = toolEnv()
 	return cmd
 }
 
@@ -200,6 +202,7 @@ func buildParparCmd(ctx context.Context, dir, baseName string, opts PAR2Options,
 	args = append(args, files...)
 	cmd := exec.CommandContext(ctx, "parpar", args...)
 	cmd.Dir = dir
+	cmd.Env = toolEnv()
 	return cmd
 }
 

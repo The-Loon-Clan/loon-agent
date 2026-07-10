@@ -121,6 +121,7 @@ func GenerateScreenshotsWatermarked(ctx context.Context, videoPath, outputDir st
 			}
 			args = append(args, "-c:v", "png", "-y", outPath)
 			cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+			cmd.Env = toolEnv()
 			// Capture stderr so a failed frame produces an actionable
 			// log line. Previously this was nil'd which silently
 			// dropped the failure — operator had no way to tell whether
@@ -133,6 +134,7 @@ func GenerateScreenshotsWatermarked(ctx context.Context, videoPath, outputDir st
 			cmd.Stderr = &stderr
 
 			if err := cmd.Run(); err != nil {
+				escalateToolCrash("ffmpeg", videoPath, []byte(stderr.String()), err)
 				log.Printf("screenshot %d/%d failed at %s: %v\n  ffmpeg stderr: %s",
 					idx+1, count, timestamp, err, tailLines(stderr.String(), 3))
 				return

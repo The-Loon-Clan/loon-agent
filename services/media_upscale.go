@@ -195,7 +195,9 @@ func upscaleOneChunk(ctx context.Context, src, chunkOut, work string, idx, start
 		"-t", strconv.Itoa(chunkSec),
 		"-vf", upscaleExtractFilters,
 		filepath.Join(framesIn, "%08d.png"))
+	extractCmd.Env = toolEnv()
 	if out, err := extractCmd.CombinedOutput(); err != nil {
+		escalateToolCrash("ffmpeg", src, out, err)
 		return fmt.Errorf("extract: %w\n%s", err, tailLines(string(out), 4))
 	}
 
@@ -206,7 +208,9 @@ func upscaleOneChunk(ctx context.Context, src, chunkOut, work string, idx, start
 		"-f", "png",
 	}, m.Args...)
 	upCmd := exec.CommandContext(ctx, m.Binary, upArgs...)
+	upCmd.Env = toolEnv()
 	if out, err := upCmd.CombinedOutput(); err != nil {
+		escalateToolCrash(m.Binary, src, out, err)
 		return fmt.Errorf("%s: %w\n%s", m.Binary, err, tailLines(string(out), 6))
 	}
 
@@ -221,7 +225,9 @@ func upscaleOneChunk(ctx context.Context, src, chunkOut, work string, idx, start
 		"-pix_fmt", "yuv420p10le",
 		"-an",
 		chunkOut)
+	encodeCmd.Env = toolEnv()
 	if out, err := encodeCmd.CombinedOutput(); err != nil {
+		escalateToolCrash("ffmpeg", src, out, err)
 		return fmt.Errorf("encode: %w\n%s", err, tailLines(string(out), 6))
 	}
 	return nil
@@ -229,11 +235,14 @@ func upscaleOneChunk(ctx context.Context, src, chunkOut, work string, idx, start
 
 // probeVideo returns (duration_seconds, frames_per_second) via ffprobe.
 func probeVideo(ctx context.Context, src string) (float64, float64, error) {
-	durOut, err := exec.CommandContext(ctx, "ffprobe",
+	durCmd := exec.CommandContext(ctx, "ffprobe",
 		"-v", "error",
 		"-show_entries", "format=duration",
-		"-of", "default=noprint_wrappers=1:nokey=1", src).Output()
+		"-of", "default=noprint_wrappers=1:nokey=1", src)
+	durCmd.Env = toolEnv()
+	durOut, err := durCmd.Output()
 	if err != nil {
+		escalateToolCrash("ffprobe", src, durOut, err)
 		return 0, 0, err
 	}
 	dur, err := strconv.ParseFloat(strings.TrimSpace(string(durOut)), 64)
@@ -241,12 +250,15 @@ func probeVideo(ctx context.Context, src string) (float64, float64, error) {
 		return 0, 0, err
 	}
 
-	fpsOut, err := exec.CommandContext(ctx, "ffprobe",
+	fpsCmd := exec.CommandContext(ctx, "ffprobe",
 		"-v", "error",
 		"-select_streams", "v:0",
 		"-show_entries", "stream=r_frame_rate",
-		"-of", "default=noprint_wrappers=1:nokey=1", src).Output()
+		"-of", "default=noprint_wrappers=1:nokey=1", src)
+	fpsCmd.Env = toolEnv()
+	fpsOut, err := fpsCmd.Output()
 	if err != nil {
+		escalateToolCrash("ffprobe", src, fpsOut, err)
 		return 0, 0, err
 	}
 	fps, err := parseFraction(strings.TrimSpace(string(fpsOut)))
@@ -298,7 +310,9 @@ func runFFmpegConcat(ctx context.Context, listPath, dst string) error {
 		"-i", listPath,
 		"-c", "copy",
 		dst)
+	cmd.Env = toolEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
+		escalateToolCrash("ffmpeg", dst, out, err)
 		return fmt.Errorf("%w\n%s", err, tailLines(string(out), 4))
 	}
 	return nil
@@ -319,7 +333,9 @@ func runFFmpegMux(ctx context.Context, videoOnly, originalForAudio, dst string) 
 		"-map_chapters", "1",
 		"-c", "copy",
 		dst)
+	cmd.Env = toolEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
+		escalateToolCrash("ffmpeg", dst, out, err)
 		return fmt.Errorf("%w\n%s", err, tailLines(string(out), 6))
 	}
 	return nil

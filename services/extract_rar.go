@@ -164,8 +164,10 @@ func extractOneRAR(ctx context.Context, archive, outDir string) error {
 	}
 	cmd := exec.CommandContext(ctx, rarExtractBinary, args...)
 	cmd.Dir = outDir
+	cmd.Env = toolEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		escalateToolCrash(rarExtractBinary, archive, out, err)
 		return fmt.Errorf("%s: %w\n%s", rarExtractBinary, err, strings.TrimSpace(string(out)))
 	}
 	return nil

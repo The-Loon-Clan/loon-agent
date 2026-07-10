@@ -182,4 +182,3 @@ func (s *OfferFulfillService) fulfillOne(ctx context.Context, r client.OfferPend
 	log.Printf("[offer-fulfill #%d] delivered nzb_id=%d status=%s delivered=%v",
 		rid, resp.NzbID, resp.Status, resp.Delivered)
 }
-

@@ -68,9 +68,9 @@ func ExtractDominantPalette(screenshotPaths []string, topN int) []string {
 		// rendered swatch matches the average pixel, not the
 		// bucket's bottom-left corner.
 		k := buckets[i].key
-		r := byte(((k >> 8) & 0xF) << 4) | 0x08
-		g := byte(((k >> 4) & 0xF) << 4) | 0x08
-		b := byte(((k >> 0) & 0xF) << 4) | 0x08
+		r := byte(((k>>8)&0xF)<<4) | 0x08
+		g := byte(((k>>4)&0xF)<<4) | 0x08
+		b := byte(((k>>0)&0xF)<<4) | 0x08
 		out = append(out, fmt.Sprintf("#%02x%02x%02x", r, g, b))
 	}
 	return out

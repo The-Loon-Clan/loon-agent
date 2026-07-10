@@ -114,8 +114,10 @@ func Extract7zArchives(ctx context.Context, dir string, logFn func(string)) (int
 func extractOne7z(ctx context.Context, archive, outDir string) error {
 	cmd := exec.CommandContext(ctx, sevenZipBinary, "x", "-y", "-aoa", archive)
 	cmd.Dir = outDir
+	cmd.Env = toolEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		escalateToolCrash(sevenZipBinary, archive, out, err)
 		return fmt.Errorf("%s: %w\n%s", sevenZipBinary, err, strings.TrimSpace(string(out)))
 	}
 	return nil

@@ -739,7 +739,7 @@ func yEncodeChunk(data []byte, filename string, partNumber int, totalParts int, 
 	// combine them in part-order into the whole-file CRC. Single-part
 	// files skip the map entirely — pcrc32 == crc32 in that case.
 	var (
-		wholeFileCRC    uint32
+		wholeFileCRC     uint32
 		emitWholeFileCRC bool
 	)
 	if totalParts > 1 {
