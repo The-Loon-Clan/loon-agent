@@ -40,7 +40,7 @@ services:
 
   agent:
     build: .
-    image: usenet-pipeline:latest
+    image: loon-agent:latest
     container_name: indexer-agent
     # VPN routing mode:
     #
@@ -98,7 +98,7 @@ services:
       - NNTP_FROM=${NNTP_FROM:-agent@your-domain.com}
       - NNTP_DOMAIN=${NNTP_DOMAIN:-your-domain.com}
       # Branding
-      - GENERATOR_NAME=${GENERATOR_NAME:-usenet-pipeline}
+      - GENERATOR_NAME=${GENERATOR_NAME:-loon-agent}
       # Processing
       - ENCRYPT=${ENCRYPT:-true}
       - PAR2_REDUNDANCY=${PAR2_REDUNDANCY:-5}

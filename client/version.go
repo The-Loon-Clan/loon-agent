@@ -943,7 +943,7 @@ const AgentProtocolVersion = 3
 //     New .github/workflows/docker-publish.yml auto-publishes
 //     the same multi-arch manifest on every push to main —
 //     ARM operators (Raspberry Pi 4/5, Apple Silicon, AWS
-//     Graviton) can now `docker pull amenzb/usenet-pipeline
+//     Graviton) can now `docker pull amenzb/loon-agent
 //     :latest` without building from source.
 //
 //  3. Collection mode. New 3-tab local UI (Mirror / Offers /

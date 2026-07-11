@@ -76,7 +76,7 @@ type Config struct {
 	SlowSpeedTimeoutMins  int     // minutes of sustained slow speed before rejecting (default 10)
 
 	// Branding
-	GeneratorName string // NZB x-generator header (default "usenet-pipeline")
+	GeneratorName string // NZB x-generator header (default "loon-agent")
 
 	// Obfuscation & Encryption
 	Obfuscate bool // rename files to random hex before upload (default false)
@@ -183,7 +183,7 @@ func newConfigFromLayered(l *Layered) *Config {
 		CPUMaxPercent:          layeredFloat("cpu_max_percent", 85),
 		SlowSpeedThresholdMBs:  layeredFloat("slow_speed_threshold_mbs", 0.05),
 		SlowSpeedTimeoutMins:   layeredInt("slow_speed_timeout_mins", 10),
-		GeneratorName:          getEnv("GENERATOR_NAME", "usenet-pipeline"),
+		GeneratorName:          getEnv("GENERATOR_NAME", "loon-agent"),
 		Obfuscate:              getEnv("OBFUSCATE", "false") == "true",
 		Encrypt:                getEnv("ENCRYPT", "false") == "true",
 		CollectionRoot:         getEnv("COLLECTION_ROOT", ""),
