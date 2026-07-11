@@ -5,8 +5,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/ameNZB/usenet-pipeline/client"
-	"github.com/ameNZB/usenet-pipeline/storage"
+	"github.com/ameNZB/loon-agent/client"
+	"github.com/ameNZB/loon-agent/storage"
 )
 
 // siteGroupsPollInterval is how often we pull the site's catalog when

@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in contributing to usenet-pipeline.
+Thanks for your interest in contributing to loon-agent.
 
 ## Development Setup
 

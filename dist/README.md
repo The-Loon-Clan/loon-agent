@@ -1,4 +1,4 @@
-# usenet-pipeline — Pre-built Distribution
+# loon-agent — Pre-built Distribution
 
 This directory is used for distributing pre-built Docker images to end users who don't need the source code.
 

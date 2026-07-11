@@ -3,7 +3,7 @@ package client
 import (
 	"time"
 
-	"github.com/ameNZB/usenet-pipeline/config"
+	"github.com/ameNZB/loon-agent/config"
 )
 
 // Site is the contract the agent expects from whatever indexer it

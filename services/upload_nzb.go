@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
-	"github.com/ameNZB/usenet-pipeline/config"
+	"github.com/ameNZB/loon-agent/config"
 	"log"
 	"os"
 	"strings"

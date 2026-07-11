@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ameNZB/usenet-pipeline/storage"
+	"github.com/ameNZB/loon-agent/storage"
 )
 
 // TestPageTemplatesRender exercises every page template with a plausible

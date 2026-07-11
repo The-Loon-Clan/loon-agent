@@ -28,7 +28,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ameNZB/usenet-pipeline/client"
+	"github.com/ameNZB/loon-agent/client"
 )
 
 // CollectionItem is one file the scanner found + (optionally) its

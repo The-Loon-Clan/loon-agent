@@ -17,11 +17,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ameNZB/usenet-pipeline/client"
-	"github.com/ameNZB/usenet-pipeline/config"
-	"github.com/ameNZB/usenet-pipeline/services"
-	"github.com/ameNZB/usenet-pipeline/storage"
-	"github.com/ameNZB/usenet-pipeline/utils"
+	"github.com/ameNZB/loon-agent/client"
+	"github.com/ameNZB/loon-agent/config"
+	"github.com/ameNZB/loon-agent/services"
+	"github.com/ameNZB/loon-agent/storage"
+	"github.com/ameNZB/loon-agent/utils"
 )
 
 // ── Live status: aggregated across all concurrent tasks ─────────────────────

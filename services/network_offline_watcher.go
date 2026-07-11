@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ameNZB/usenet-pipeline/storage"
+	"github.com/ameNZB/loon-agent/storage"
 )
 
 const (

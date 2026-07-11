@@ -1,4 +1,4 @@
-module github.com/ameNZB/usenet-pipeline
+module github.com/ameNZB/loon-agent
 
 go 1.25.0
 

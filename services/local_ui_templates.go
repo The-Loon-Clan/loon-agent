@@ -3,7 +3,7 @@ package services
 import (
 	"html/template"
 
-	"github.com/ameNZB/usenet-pipeline/storage"
+	"github.com/ameNZB/loon-agent/storage"
 )
 
 // The local UI uses one layout template with a sidebar + top bar, and each

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ameNZB/usenet-pipeline/config"
-	"github.com/ameNZB/usenet-pipeline/storage"
+	"github.com/ameNZB/loon-agent/config"
+	"github.com/ameNZB/loon-agent/storage"
 )
 
 // processorPollInterval is how often we look for a queued job when the

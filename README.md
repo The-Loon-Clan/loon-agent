@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="img/logo.png" alt="usenet-pipeline" width="180">
+  <img src="img/logo.png" alt="loon-agent" width="180">
 </p>
 
-<h1 align="center">usenet-pipeline</h1>
+<h1 align="center">loon-agent</h1>
 
 A self-hosted agent that automates the torrent-to-Usenet pipeline: downloads torrents, extracts media metadata, generates PAR2 recovery, optionally encrypts, uploads to Usenet via NNTP, and reports back to a companion indexer site with a complete NZB.
 

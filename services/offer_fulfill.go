@@ -20,9 +20,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ameNZB/usenet-pipeline/client"
-	"github.com/ameNZB/usenet-pipeline/config"
-	"github.com/ameNZB/usenet-pipeline/storage"
+	"github.com/ameNZB/loon-agent/client"
+	"github.com/ameNZB/loon-agent/config"
+	"github.com/ameNZB/loon-agent/storage"
 )
 
 type OfferFulfillService struct {

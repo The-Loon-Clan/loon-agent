@@ -1,8 +1,8 @@
 package services
 
 import (
-	"github.com/ameNZB/usenet-pipeline/config"
-	"github.com/ameNZB/usenet-pipeline/storage"
+	"github.com/ameNZB/loon-agent/config"
+	"github.com/ameNZB/loon-agent/storage"
 	"io"
 	"log"
 	"net/http"

@@ -13,7 +13,7 @@ type Config struct {
 	PollInterval int // seconds between polls
 	// SiteName is the display label for the site this agent talks to.
 	// Pulled into the local UI sidebar and any future operator-facing
-	// log lines so forks of usenet-pipeline don't have to grep + edit
+	// log lines so forks of loon-agent don't have to grep + edit
 	// hardcoded brand strings. Empty falls back to a neutral default
 	// at render time so the UI still looks finished out of the box.
 	// Configure via SITE_NAME env var or the on-disk config.yml.
@@ -85,7 +85,7 @@ type Config struct {
 	// ── Offer feature (gated by OFFER_ENABLED) ──────────────────────
 	// When disabled (default) the agent skips the offer-sync loop
 	// entirely — no scraping, no /api/agent/offer/* polls. Existing
-	// usenet-pipeline users stay on the old path until they explicitly
+	// loon-agent users stay on the old path until they explicitly
 	// turn this on. The token must ALSO carry the 'offer' scope (set
 	// on the site at /account-settings); a bare OFFER_ENABLED=true
 	// with no scope will get 403s from the site and the sync loop
