@@ -1,0 +1,27 @@
+# Files that should never leak into the docker build context.
+#
+# vendor/ is .gitignored but a maintainer with a populated local
+# vendor folder used to ship it into the image, masking the fact
+# that fresh clones couldn't build. The Dockerfile now uses
+# `go mod download` instead of `-mod=vendor` so vendor must be
+# excluded here to keep build behaviour consistent across
+# maintainer + fresh-clone runs.
+vendor/
+
+# Build artefacts that have no business in the image.
+indexer
+indexer.exe
+*.exe
+
+# Test + tool data that bloats context without contributing.
+data/
+dist/
+.git/
+.github/
+.vscode/
+.idea/
+
+# IDE + editor scratch.
+*.swp
+*.swo
+.DS_Store

@@ -1,0 +1,65 @@
+services:
+  vpn:
+    image: qmcgaw/gluetun
+    container_name: agent-vpn
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      # VPN provider config — see https://github.com/qdm12/gluetun-wiki/tree/main/setup/providers
+      - VPN_SERVICE_PROVIDER=${VPN_PROVIDER:?Set VPN_PROVIDER in .env}
+      - VPN_TYPE=${VPN_TYPE:-openvpn}
+      - OPENVPN_USER=${VPN_USER:?Set VPN_USER in .env}
+      - OPENVPN_PASSWORD=${VPN_PASS:?Set VPN_PASS in .env}
+      - SERVER_COUNTRIES=${VPN_COUNTRY:-Netherlands}
+      # SOCKS5 proxy for split-tunnel mode (VPN_DOWNLOAD_ONLY=true).
+      # The agent connects to vpn:1080 for torrent traffic only.
+      - SOCKS5=on
+      - SOCKS5_LISTENING_ADDRESS=:1080
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data/gluetun:/gluetun
+    restart: unless-stopped
+
+  agent:
+    image: ghcr.io/YOUR_USERNAME/loon-agent:latest
+    container_name: indexer-agent
+    # VPN routing mode:
+    #   VPN_DOWNLOAD_ONLY=false (default): ALL traffic through VPN (kill-switch).
+    #   VPN_DOWNLOAD_ONLY=true: only torrent downloads through VPN (SOCKS5 proxy),
+    #     NNTP uploads go direct for full upload speed.
+    #     → set AGENT_NETWORK_MODE=bridge in .env
+    network_mode: "${AGENT_NETWORK_MODE:-service:vpn}"
+    depends_on:
+      - vpn
+    environment:
+      # Site connection
+      - SITE_URL=${SITE_URL:?Set SITE_URL in .env}
+      - AGENT_TOKEN=${AGENT_TOKEN:?Set AGENT_TOKEN in .env}
+      - POLL_INTERVAL=${POLL_INTERVAL:-30}
+      # Directories
+      - TEMP_DIR=/data/temp
+      # VPN split-tunnel
+      - VPN_DOWNLOAD_ONLY=${VPN_DOWNLOAD_ONLY:-false}
+      - VPN_PROXY_ADDR=${VPN_PROXY_ADDR:-vpn:1080}
+      # NNTP / Usenet upload
+      - NNTP_SERVER=${NNTP_SERVER:?Set NNTP_SERVER in .env}
+      - NNTP_SSL=${NNTP_SSL:-true}
+      - NNTP_CONNECTIONS=${NNTP_CONNECTIONS:-10}
+      - NNTP_USER=${NNTP_USER:?Set NNTP_USER in .env}
+      - NNTP_PASS=${NNTP_PASS:?Set NNTP_PASS in .env}
+      - NNTP_GROUP=${NNTP_GROUP:-alt.binaries.multimedia.anime.highspeed}
+      - NNTP_POSTER=${NNTP_POSTER:-agent <agent@your-domain.com>}
+      - NNTP_FROM=${NNTP_FROM:-agent@your-domain.com}
+      - NNTP_DOMAIN=${NNTP_DOMAIN:-your-domain.com}
+      # Branding
+      - GENERATOR_NAME=${GENERATOR_NAME:-loon-agent}
+      # Processing
+      - ENCRYPT=${ENCRYPT:-true}
+      - PAR2_REDUNDANCY=${PAR2_REDUNDANCY:-5}
+      - COLLECTION_HOST_DIR=${COLLECTION_HOST_DIR:-/data/collection}
+    volumes:
+      - ./data/agent:/data
+    restart: unless-stopped
