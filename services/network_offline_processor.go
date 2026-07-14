@@ -304,7 +304,7 @@ func processOfflineJob(ctx context.Context, cfg *config.Config, db *storage.DB, 
 	defer UploadSlot.Unlock()
 
 	phase("uploading", 0)
-	fileSegments, err := UploadDirectory(ctx, &jobCfg, uploadDir, jobName)
+	fileSegments, err := UploadDirectory(ctx, &jobCfg, uploadDir, job.Title, jobName)
 	if err != nil {
 		return "", "", fmt.Errorf("upload: %w", err)
 	}

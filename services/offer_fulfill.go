@@ -153,7 +153,7 @@ func (s *OfferFulfillService) fulfillOne(ctx context.Context, r client.OfferPend
 	// 4. Upload to Usenet. Same path the task-driven pipeline uses,
 	// minus the post-download media transforms — for personal-source
 	// fulfillment we ship the bits as-is.
-	fileSegments, err := UploadDirectory(ctx, s.cfg, stageDir, jobName)
+	fileSegments, err := UploadDirectory(ctx, s.cfg, stageDir, filepath.Base(localPath), jobName)
 	if err != nil {
 		failRequest("upload", err)
 		return

@@ -2433,7 +2433,7 @@ func processTask(cfg *config.Config, site client.Site, task *client.AgentTask, r
 	services.SetProgressCallbackForJob(jobName, progressCb)
 
 	uploadStart := time.Now()
-	fileSegments, err := services.UploadDirectory(ctx, cfg, uploadDir, jobName)
+	fileSegments, err := services.UploadDirectory(ctx, cfg, uploadDir, task.Title, jobName)
 
 	services.ClearProgressCallbackForJob(jobName)
 

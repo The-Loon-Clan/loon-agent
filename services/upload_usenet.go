@@ -123,9 +123,18 @@ type NZBSegment struct {
 }
 
 // UploadDirectory uploads all files in a directory to Usenet and returns
-// per-file segment lists suitable for NZB generation. Files are uploaded
-// with obfuscated subjects; the real names are only in the NZB.
-func UploadDirectory(ctx context.Context, cfg *config.Config, dir string, jobName string) ([]FileSegments, error) {
+// per-file segment lists suitable for NZB generation.
+//
+// Every article is posted with a CANONICAL yEnc subject —
+// `<release> [i/F] - "name" yEnc (n/P)` — so any indexer (a third party, or our
+// own crawler) can group the parts and rebuild the release from the newsgroup
+// alone; this is the round-trip partner of the usenet plugin's parseSubject.
+// releaseName is the shared "base" before the [i/F] marker that groups the
+// files. Privacy is a NAME concern, not a structure one: when cfg.Obfuscate is
+// set the release base + per-file names become random tokens (and the yEnc body
+// name matches), so the posts stay rebuildable but reveal nothing; otherwise the
+// real title/filenames are used (full interop).
+func UploadDirectory(ctx context.Context, cfg *config.Config, dir string, releaseName string, jobName string) ([]FileSegments, error) {
 	var files []string
 	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || info.Size() == 0 {
@@ -137,6 +146,7 @@ func UploadDirectory(ctx context.Context, cfg *config.Config, dir string, jobNam
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no files to upload in %s", dir)
 	}
+	fileCount := len(files)
 
 	// Calculate total size across all files for cumulative progress.
 	var totalDirSize int64
@@ -147,6 +157,14 @@ func UploadDirectory(ctx context.Context, cfg *config.Config, dir string, jobNam
 	}
 	var cumulativeUploaded int64
 
+	// The release base is shared by every file's subject (the text before [i/F])
+	// so a crawler groups them into one release. Real title for interop; one
+	// random token per release when obfuscating.
+	releaseBase := subjectSafe(releaseName)
+	if cfg.Obfuscate {
+		releaseBase = GenerateRandomPassword(16)
+	}
+
 	var allFiles []FileSegments
 	for i, filePath := range files {
 		if ctx.Err() != nil {
@@ -156,13 +174,22 @@ func UploadDirectory(ctx context.Context, cfg *config.Config, dir string, jobNam
 		// Use relative path so NZB preserves subdirectory structure.
 		relName, _ := filepath.Rel(dir, filePath)
 		relName = filepath.ToSlash(relName) // normalize to forward slashes for NZB
-		// Obfuscated subject prevents filename leaking on Usenet.
-		obfSubject := GenerateRandomPassword(16)
+
+		// The name shown in the subject + written into the yEnc body. Obfuscate
+		// keeps the extension so clients still recognise the type.
+		postName := filepath.Base(relName)
+		if cfg.Obfuscate {
+			postName = GenerateRandomPassword(16) + filepath.Ext(postName)
+		}
 
 		storage.UpdateState(jobName, "Uploading",
-			fmt.Sprintf("File %d/%d: %s", i+1, len(files), relName), 0)
+			fmt.Sprintf("File %d/%d: %s", i+1, fileCount, relName), 0)
 
-		segments, err := UploadToUsenet(ctx, cfg, filePath, obfSubject, jobName, cumulativeUploaded, totalDirSize)
+		// Canonical subject up to the segment marker; UploadToUsenet appends
+		// " (n/P)" per chunk.
+		subjectPrefix := fmt.Sprintf(`%s [%d/%d] - "%s" yEnc`, releaseBase, i+1, fileCount, subjectSafe(postName))
+
+		segments, err := UploadToUsenet(ctx, cfg, filePath, subjectPrefix, postName, jobName, cumulativeUploaded, totalDirSize)
 		if err != nil {
 			return nil, fmt.Errorf("upload %s: %w", relName, err)
 		}
@@ -172,11 +199,11 @@ func UploadDirectory(ctx context.Context, cfg *config.Config, dir string, jobNam
 			cumulativeUploaded += info.Size()
 		}
 
-		// Build the standard subject for the NZB entry.
-		totalParts := len(segments)
-		stat, _ := os.Stat(filePath)
-		nzbSubject := fmt.Sprintf("[%d/%d] - \"%s\" yEnc (1/%d) %d",
-			i+1, len(files), relName, totalParts, stat.Size())
+		// The NZB always records the REAL name + a canonical first-segment
+		// subject, so the site (and any NZB consumer) sees the real release even
+		// when the posts are name-obfuscated. The <segments> carry the message-ids.
+		nzbSubject := fmt.Sprintf(`%s [%d/%d] - "%s" yEnc (1/%d)`,
+			subjectSafe(releaseName), i+1, fileCount, relName, len(segments))
 
 		allFiles = append(allFiles, FileSegments{
 			FileName: nzbSubject,
@@ -186,8 +213,30 @@ func UploadDirectory(ctx context.Context, cfg *config.Config, dir string, jobNam
 	return allFiles, nil
 }
 
+// subjectSafe strips characters that would confuse a yEnc subject parser
+// (brackets, parens, quotes) and collapses whitespace, so a release title used
+// as the subject base can't inject a spurious [i/j] or (n/m) marker. Empty input
+// falls back to a placeholder so the subject is never malformed.
+func subjectSafe(s string) string {
+	s = strings.NewReplacer(
+		"[", " ", "]", " ", "(", " ", ")", " ", `"`, " ",
+		"\r", " ", "\n", " ", "\t", " ",
+	).Replace(s)
+	s = strings.Join(strings.Fields(s), " ")
+	if s == "" {
+		return "release"
+	}
+	return s
+}
+
 // UploadToUsenet chunks the file and uploads it using a worker pool.
-func UploadToUsenet(ctx context.Context, cfg *config.Config, filePath string, subject string, jobName string, cumulativeBytes int64, totalDirSize int64) ([]NZBSegment, error) {
+//
+// subjectPrefix is the canonical yEnc subject up to (but not including) the
+// segment marker — `<release> [i/F] - "<name>" yEnc` — to which each chunk
+// appends its own ` (n/P)`. embedName is the filename written into the yEnc
+// `=ybegin name=` header; it equals the subject's quoted name so the article
+// body and its subject agree (both real, or both obfuscated).
+func UploadToUsenet(ctx context.Context, cfg *config.Config, filePath string, subjectPrefix string, embedName string, jobName string, cumulativeBytes int64, totalDirSize int64) ([]NZBSegment, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -214,7 +263,7 @@ func UploadToUsenet(ctx context.Context, cfg *config.Config, filePath string, su
 	// Dispatch jobs (read file in chunks).
 	go func() {
 		defer close(jobs)
-		fileName := filepath.Base(filePath)
+		fileName := embedName
 		for i := 1; i <= totalChunks; i++ {
 			if ctx.Err() != nil {
 				return
@@ -249,7 +298,7 @@ func UploadToUsenet(ctx context.Context, cfg *config.Config, filePath string, su
 				ChunkData:   chunkData,
 				Number:      i,
 				TotalParts:  totalChunks,
-				Subject:     fmt.Sprintf("%s [%d/%d]", subject, i, totalChunks),
+				Subject:     fmt.Sprintf("%s (%d/%d)", subjectPrefix, i, totalChunks),
 				FileName:    fileName,
 				ChunkOffset: offset,
 				TotalSize:   stat.Size(),
