@@ -119,8 +119,12 @@ func GeneratePAR2(ctx context.Context, dir string, baseName string, opts PAR2Opt
 		parsePAR2Progress(stdout, &lastOutput, progressFn)
 	}()
 
-	err = cmd.Wait()
+	// Drain the pipe BEFORE reaping the process: cmd.Wait closes the stdout
+	// pipe once the child exits, so waiting on it first can cut the reader
+	// off mid-scan and empty out lastOutput — the one diagnostic that matters
+	// when par2 dies. os/exec documents this ordering as required.
 	wg.Wait()
+	err = cmd.Wait()
 
 	if err != nil {
 		escalateToolCrash(par2Binary, dir, []byte(lastOutput.String()), err)
