@@ -40,6 +40,11 @@ func detectPAR2Binary() string {
 	return "par2create" // will fail at exec time with a clear error
 }
 
+// maxPAR2Slices is the PAR2 specification's ceiling on input slices. Both
+// parpar and par2create refuse to run past it, so the slice size — not the
+// slice count — is what has to give on a large release.
+const maxPAR2Slices = 32768
+
 // PAR2Options controls PAR2 generation parameters.
 type PAR2Options struct {
 	Redundancy int // recovery percentage (default 5)
@@ -83,8 +88,14 @@ func GeneratePAR2(ctx context.Context, dir string, baseName string, opts PAR2Opt
 		return nil, fmt.Errorf("no files found in %s", dir)
 	}
 
-	log.Printf("PAR2: generating %d%% recovery for %d files (%.1f MB total), base=%s, binary=%s",
-		opts.Redundancy, len(files), float64(totalSize)/1024/1024, baseName, par2Binary)
+	if scaled := fitBlockSize(totalSize, opts.BlockSize); scaled != opts.BlockSize {
+		log.Printf("PAR2: %d slices at %dB exceeds the %d-slice PAR2 limit — scaling slice size to %dB",
+			totalSize/int64(opts.BlockSize), opts.BlockSize, maxPAR2Slices, scaled)
+		opts.BlockSize = scaled
+	}
+
+	log.Printf("PAR2: generating %d%% recovery for %d files (%.1f MB total), base=%s, binary=%s, slice=%dB",
+		opts.Redundancy, len(files), float64(totalSize)/1024/1024, baseName, par2Binary, opts.BlockSize)
 
 	// 60-minute cap is a backstop, not a target — most PAR2 runs complete
 	// in seconds-to-minutes. Protects against a wedged par2create/parpar
@@ -146,6 +157,23 @@ func GeneratePAR2(ctx context.Context, dir string, baseName string, opts PAR2Opt
 	}
 	log.Printf("PAR2: done — %d recovery files (%.1f MB)", len(par2Files), float64(par2Size)/1024/1024)
 	return par2Files, nil
+}
+
+// fitBlockSize returns a slice size that keeps totalSize under the PAR2
+// input-slice ceiling, or want unchanged if it already fits.
+//
+// Callers pass the Usenet article size (700KB) as the slice size, but the two
+// are unrelated: article size is a posting constraint, slice size is a PAR2
+// one. Holding the slice at 700KB silently caps a release at
+// 32768*700KB ≈ 21.9 GiB — past that the tool exits non-zero and the release
+// ships with no recovery at all. Growing the slice is what par2 tooling does
+// by default; the spec requires a multiple of 4.
+func fitBlockSize(totalSize int64, want int) int {
+	if want <= 0 || totalSize <= 0 || totalSize/int64(want) <= maxPAR2Slices {
+		return want
+	}
+	scaled := (totalSize + maxPAR2Slices - 1) / maxPAR2Slices
+	return int(((scaled + 3) / 4) * 4)
 }
 
 // buildPar2createCmd builds the exec.Cmd for the traditional par2create binary.
