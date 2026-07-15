@@ -22,15 +22,49 @@ import (
 type PAR2ProgressFunc func(phase string, pct float64)
 
 var (
-	par2Once sync.Once
-	par2Bin  string
+	par2Once     sync.Once
+	par2Bin      string
+	par2Method   string // resolved parpar --method ("" = parpar's own auto-select)
+	par2ForcedMu sync.Mutex
+	par2Forced   string // PAR2_METHOD override; skips the ladder
 )
+
+// SetPAR2Method pins parpar's GF16 kernel instead of probing for one, for an
+// operator who knows their hardware or needs to work around a bad kernel we
+// haven't seen. Empty (the default) means probe. Call before the first par2 job.
+func SetPAR2Method(m string) {
+	par2ForcedMu.Lock()
+	defer par2ForcedMu.Unlock()
+	par2Forced = strings.TrimSpace(m)
+}
+
+// par2MethodLadder is probed in descending order of expected throughput; the
+// first kernel that actually runs on this CPU wins.
+//
+// It exists because "the CPU supports this instruction set" and "this kernel
+// runs on this CPU" turned out to be different claims. Production is a Xeon
+// Gold 6140 (Skylake-SP): parpar's own detection correctly picks Shuffle
+// (AVX512), which the CPU implements, and the kernel dies on SIGILL regardless.
+// Since the agent is fleet software running on hardware we don't control, the
+// only trustworthy answer is empirical — ask the machine, don't infer.
+//
+// "" first: parpar's auto-select is the best choice wherever it works, and it
+// tunes more than we can express here (loop tiling, thread count).
+var par2MethodLadder = []string{
+	"",               // parpar's own auto-select
+	"xorjit-avx512",  // AVX512BW
+	"shuffle-avx512", // AVX512BW
+	"xorjit-avx2",    // AVX2
+	"shuffle-avx2",   // AVX2
+	"shuffle-sse",    // SSSE3
+	"lookup",         // scalar; no SIMD, runs anywhere
+}
 
 // par2Binary resolves, once, which par2 implementation to use.
 //
-// Deliberately lazy rather than a package-level initializer: the probe below
-// runs a real par2 job, and a mismatched parpar dies on SIGILL. Resolving at
-// init would fork that child before main() reaches disableCoreDumps(), and a
+// Deliberately lazy rather than a package-level initializer: the probes below
+// run real par2 jobs, and a mismatched parpar dies on SIGILL. Resolving at init
+// would fork those children before main() reaches disableCoreDumps(), and a
 // crash dump of a child in a content tree is exactly what published our NNTP
 // password to Usenet once already.
 func par2Binary() string {
@@ -38,18 +72,27 @@ func par2Binary() string {
 	return par2Bin
 }
 
+// par2ResolvedMethod returns the kernel chosen by detectPAR2Binary.
+func par2ResolvedMethod() string {
+	par2Binary()
+	return par2Method
+}
+
 func detectPAR2Binary() string {
 	// parpar is a parallel PAR2 implementation — dramatically faster on
-	// multi-core systems. If it's installed AND it runs here, use it.
+	// multi-core systems, and it handles non-ASCII filenames correctly where
+	// par2cmdline mangles them. Worth some effort to keep.
 	if path, err := exec.LookPath("parpar"); err == nil {
-		if err := smokePAR2("parpar"); err == nil {
-			log.Printf("PAR2: using parpar (%s) — multi-threaded", path)
+		if m, err := resolveParparMethod(); err == nil {
+			par2Method = m
+			log.Printf("PAR2: using parpar (%s) with method %s — multi-threaded",
+				path, methodLabel(m))
 			return "parpar"
 		} else {
-			log.Printf("PAR2: parpar (%s) is installed but FAILED its smoke test (%v). "+
-				"Falling back to par2create — recovery data will still be generated, but "+
-				"single-threaded, and non-ASCII filenames may be mangled in the PAR2 header. "+
-				"A crash here means parpar's SIMD kernels do not match this CPU.", path, err)
+			log.Printf("PAR2: parpar (%s) is installed but no GF16 kernel runs on this CPU (%v). "+
+				"Falling back to par2create — recovery data is still generated, but "+
+				"single-threaded, and non-ASCII filenames may be mangled in the PAR2 header.",
+				path, err)
 		}
 	}
 	if path, err := exec.LookPath("par2create"); err == nil {
@@ -58,6 +101,43 @@ func detectPAR2Binary() string {
 	}
 	log.Println("PAR2: WARNING — no par2 binary found in PATH")
 	return "par2create" // will fail at exec time with a clear error
+}
+
+// resolveParparMethod walks the ladder and returns the first kernel that
+// survives a real par2 run on this machine.
+func resolveParparMethod() (string, error) {
+	par2ForcedMu.Lock()
+	forced := par2Forced
+	par2ForcedMu.Unlock()
+
+	ladder := par2MethodLadder
+	if forced != "" {
+		ladder = []string{forced} // operator's call: no silent second-guessing
+	}
+
+	var failures []string
+	for _, m := range ladder {
+		err := smokePAR2("parpar", m)
+		if err == nil {
+			if len(failures) > 0 {
+				// Not an error, but the operator wants to know their fastest
+				// kernel is unusable — it points at a bad build or a CPU we
+				// should ladder differently.
+				log.Printf("PAR2: %d faster parpar kernel(s) failed on this CPU before %s worked: %s",
+					len(failures), methodLabel(m), strings.Join(failures, "; "))
+			}
+			return m, nil
+		}
+		failures = append(failures, fmt.Sprintf("%s (%v)", methodLabel(m), err))
+	}
+	return "", fmt.Errorf("%s", strings.Join(failures, "; "))
+}
+
+func methodLabel(m string) string {
+	if m == "" {
+		return "auto"
+	}
+	return m
 }
 
 // smokePAR2 proves the binary can actually produce recovery data on THIS CPU,
@@ -70,7 +150,7 @@ func detectPAR2Binary() string {
 // failed every single job — and since par2 failure is non-fatal by design, every
 // release shipped to Usenet with no recovery at all and nothing looked broken.
 // Probing the real code path is the only check that would have caught it.
-func smokePAR2(bin string) error {
+func smokePAR2(bin string, method string) error {
 	dir, err := os.MkdirTemp("", "par2probe")
 	if err != nil {
 		return fmt.Errorf("probe tempdir: %w", err)
@@ -90,7 +170,7 @@ func smokePAR2(bin string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	opts := PAR2Options{Redundancy: 5, BlockSize: 64 * 1024}
+	opts := PAR2Options{Redundancy: 5, BlockSize: 64 * 1024, Method: method}
 	var cmd *exec.Cmd
 	if bin == "parpar" {
 		cmd = buildParparCmd(ctx, dir, "probe", opts, []string{"probe.bin"})
@@ -115,10 +195,13 @@ const maxPAR2Slices = 32768
 
 // PAR2Options controls PAR2 generation parameters.
 type PAR2Options struct {
-	Redundancy int // recovery percentage (default 5)
-	BlockSize  int // bytes per block (default 700KB = article size)
-	Threads    int // 0 = all cores, >0 = limit (parpar only)
-	MemoryMB   int // 0 = auto, >0 = cap in MB (parpar only)
+	Redundancy int    // recovery percentage (default 5)
+	BlockSize  int    // bytes per block (default 700KB = article size)
+	Threads    int    // 0 = all cores, >0 = limit (parpar only)
+	MemoryMB   int    // 0 = auto, >0 = cap in MB (parpar only)
+	Method     string // parpar --method; "" = parpar's auto-select. Normally
+	// left empty by callers and filled in by GeneratePAR2 from the probed
+	// ladder — set it only to override for one call (the probe does).
 }
 
 // GeneratePAR2 creates PAR2 recovery files for all files in the given directory.
@@ -174,6 +257,9 @@ func GeneratePAR2(ctx context.Context, dir string, baseName string, opts PAR2Opt
 
 	var cmd *exec.Cmd
 	if binary == "parpar" {
+		if opts.Method == "" {
+			opts.Method = par2ResolvedMethod()
+		}
 		cmd = buildParparCmd(par2Ctx, dir, baseName, opts, files)
 	} else {
 		cmd = buildPar2createCmd(par2Ctx, dir, baseName, opts.Redundancy, opts.BlockSize, files)
@@ -298,6 +384,11 @@ func buildParparCmd(ctx context.Context, dir, baseName string, opts PAR2Options,
 	}
 	if opts.MemoryMB > 0 {
 		args = append(args, "-m", fmt.Sprintf("%dM", opts.MemoryMB))
+	}
+	if opts.Method != "" {
+		// parpar's own help: "Process can crash if CPU does not support
+		// selected method." Only ever set from a probed/forced value.
+		args = append(args, "--method", opts.Method)
 	}
 	args = append(args, "--")
 	args = append(args, files...)

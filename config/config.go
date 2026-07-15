@@ -61,6 +61,10 @@ type Config struct {
 	PAR2Redundancy int // recovery percentage (default 5)
 	PAR2Threads    int // 0 = all cores (parpar default), >0 = limit threads
 	PAR2Memory     int // MB; 0 = auto (parpar default), >0 = cap memory usage
+	// PAR2Method pins parpar's GF16 kernel (e.g. "shuffle-avx2"). Empty = the
+	// agent probes for the fastest kernel that actually runs on this CPU, which
+	// is the right answer on hardware we don't control. Set only to override.
+	PAR2Method string
 
 	// Concurrency
 	MaxConcurrentDownloads int // how many torrents to download in parallel (default 3)
@@ -178,6 +182,7 @@ func newConfigFromLayered(l *Layered) *Config {
 		PAR2Redundancy:         getEnvAsInt("PAR2_REDUNDANCY", 5),
 		PAR2Threads:            getEnvAsInt("PAR2_THREADS", 0),
 		PAR2Memory:             getEnvAsInt("PAR2_MEMORY_MB", 0),
+		PAR2Method:             getEnv("PAR2_METHOD", ""),
 		MaxDiskUsageGB:         layeredFloat("max_disk_usage_gb", 0),
 		MaxConcurrentDownloads: layeredInt("max_concurrent_downloads", 3),
 		CPUMaxPercent:          layeredFloat("cpu_max_percent", 85),

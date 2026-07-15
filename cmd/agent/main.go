@@ -711,6 +711,7 @@ func main() {
 		}
 	}
 	services.InitDiskLimit(cfg.MaxDiskUsageGB)
+	services.SetPAR2Method(cfg.PAR2Method)
 
 	storage.StateFile = filepath.Join(cfg.TempDir, "state.json")
 	storage.LoadState()

@@ -2,6 +2,7 @@ package services
 
 import (
 	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -14,10 +15,51 @@ func TestSmokePAR2AcceptsWorkingBinary(t *testing.T) {
 			if _, err := exec.LookPath(bin); err != nil {
 				t.Skipf("%s not installed here", bin)
 			}
-			if err := smokePAR2(bin); err != nil {
+			if err := smokePAR2(bin, ""); err != nil {
 				t.Errorf("smokePAR2(%q) = %v, want nil — the probe rejects a binary that is present and expected to work", bin, err)
 			}
 		})
+	}
+}
+
+// The ladder must end in a method that needs no SIMD at all, or a CPU whose
+// vector kernels are all broken (prod's Xeon Gold 6140 is one) has nothing to
+// fall through to and loses parpar entirely.
+func TestPAR2MethodLadder(t *testing.T) {
+	if len(par2MethodLadder) == 0 {
+		t.Fatal("ladder is empty")
+	}
+	if par2MethodLadder[0] != "" {
+		t.Errorf("ladder[0] = %q, want \"\" — parpar's own auto-select should be tried first, it tunes more than we can express", par2MethodLadder[0])
+	}
+	if last := par2MethodLadder[len(par2MethodLadder)-1]; last != "lookup" {
+		t.Errorf("ladder ends with %q, want \"lookup\" — the scalar kernel is the only one guaranteed to run on any CPU", last)
+	}
+	seen := map[string]bool{}
+	for _, m := range par2MethodLadder {
+		if seen[m] {
+			t.Errorf("duplicate ladder entry %q — probes cost a real par2 run each", methodLabel(m))
+		}
+		seen[m] = true
+	}
+}
+
+// A forced method must be honoured exactly: an operator overriding the probe
+// does not want us quietly trying six other kernels behind their back.
+func TestForcedPAR2MethodSkipsLadder(t *testing.T) {
+	if _, err := exec.LookPath("parpar"); err != nil {
+		t.Skip("parpar not installed here")
+	}
+	SetPAR2Method("definitely-not-a-real-method")
+	defer SetPAR2Method("")
+
+	_, err := resolveParparMethod()
+	if err == nil {
+		t.Fatal("resolveParparMethod() = nil error for a bogus forced method, want failure")
+	}
+	// One failure reported, not the whole ladder.
+	if strings.Contains(err.Error(), "lookup") {
+		t.Errorf("forced method fell through to the ladder: %v", err)
 	}
 }
 
