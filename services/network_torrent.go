@@ -693,28 +693,54 @@ func (s *TorrentSession) ExpectedFiles() []ExpectedFile {
 		return nil
 	}
 	out := make([]ExpectedFile, 0, len(files))
-	// Single-file torrent: Files() returns a single File whose
-	// DisplayPath() == the torrent's Name. Multi-file: the name is
-	// the wrapping dir, DisplayPath is the inner path.
+	// Whether anacrolix wraps the content in a <torrent-name>/ directory is
+	// decided by the torrent's FORM, not its file count:
+	//
+	//   single-file form (metainfo has `length`, no `files`)
+	//       → written to  <dataDir>/<name>          — no wrapper
+	//   multi-file form  (metainfo has a `files` list, ANY length)
+	//       → written to  <dataDir>/<name>/<inner>  — wrapper
+	//
+	// This gated on `len(files) > 1`, which is the same thing only when a
+	// multi-file torrent has more than one file. A multi-file torrent
+	// containing exactly ONE file is still wrapped, and the check then looked
+	// for the file at the dataDir root and declared a complete download
+	// missing:
+	//
+	//   POST-MORTEM: dirContents=[…, "[Arid] Princess Mononoke […]"(4096B)]  ← a dir
+	//   screenshots: video=".../dl-request-22606/[Arid] Princess Mononoke […]/[Arid] Princess Mononoke [0CDD16E6].mkv"
+	//   Prepare: pre-stage file check failed: torrent declared 1 file(s), 1 missing
+	//
+	// — the screenshots step opened the very file the next step said was gone.
+	// info.Files is empty exactly for the single-file form, so it is the
+	// discriminator the count was standing in for.
+	multiFileForm := len(info.Files) > 0
 	for _, f := range files {
-		// f.Path() returns the inner path components; for multi-file
-		// the wrapping name is added at write-time. DisplayPath
-		// already includes the wrap, which is what we want.
-		p := f.DisplayPath()
-		// For multi-file torrents anacrolix writes to
-		// dataDir/<torrent-name>/<inner>. DisplayPath() returns
-		// "<inner>" for some library versions, "<wrapname>/<inner>"
-		// for others — normalise by checking if it already starts
-		// with t.Name()+"/".
-		name := info.Name
-		if name != "" && len(files) > 1 {
-			if !strings.HasPrefix(p, name+"/") && !strings.HasPrefix(p, name+string(os.PathSeparator)) {
-				p = name + "/" + p
-			}
-		}
-		out = append(out, ExpectedFile{Path: p, Size: f.Length()})
+		out = append(out, ExpectedFile{
+			Path: expectedPath(f.DisplayPath(), info.Name, multiFileForm),
+			Size: f.Length(),
+		})
 	}
 	return out
+}
+
+// expectedPath normalises one declared file's path to be relative to dataDir,
+// adding the <torrent-name>/ wrapper when the torrent's form means anacrolix
+// wrote one. Split out from ExpectedFiles so the three shapes can be tested
+// without standing up a torrent client — the bug lived exactly here, in a case
+// that fell between two correct ones.
+//
+// displayPath already includes the wrapper on some library versions and not on
+// others, hence the prefix check rather than an unconditional join.
+func expectedPath(displayPath, torrentName string, multiFileForm bool) string {
+	if torrentName == "" || !multiFileForm {
+		return displayPath
+	}
+	if strings.HasPrefix(displayPath, torrentName+"/") ||
+		strings.HasPrefix(displayPath, torrentName+string(os.PathSeparator)) {
+		return displayPath
+	}
+	return torrentName + "/" + displayPath
 }
 
 // downloadAndWait runs the download loop with progress reporting.
