@@ -121,7 +121,19 @@ services:
       # to another tool / a *arr stack / a backup script.
       - OFFLINE_OUTPUT_DIR=${OFFLINE_OUTPUT_DIR:-/data/offline-output}
     volumes:
-      - agent_data:/data
+      # Everything the pipeline touches — downloads, staging, par2, offline
+      # output — lives under /data. The default named volume puts that on
+      # Docker's data-root, which is usually the OS disk: fine for a trial,
+      # wrong for real use, because a single Blu-ray remux can stage tens of
+      # GB and filling the root filesystem takes the whole host down, not just
+      # a download. MAX_DISK_USAGE_GB cannot save you here either — the agent
+      # uses the LESSER of that budget and actual free space, so a cap larger
+      # than the disk is simply ignored.
+      #
+      # Point AGENT_DATA_DIR at a path on your storage array to bind-mount it
+      # instead (compose reads a path as a bind mount, a bare name as a
+      # volume), e.g. AGENT_DATA_DIR=/storage/amenzb-agent.
+      - ${AGENT_DATA_DIR:-agent_data}:/data
       # WATCH_DIR / DONE_DIR for AGENT_MODE=watch_folder. Uncomment and
       # point at whatever the user's BT client reads/writes — local
       # paths, SMB/NFS mounts, or even FTP/WebDAV mounted locally via
