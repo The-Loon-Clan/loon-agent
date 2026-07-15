@@ -1,5 +1,16 @@
 # Stage 1: Build the Go application
-FROM golang:1.25-alpine AS builder
+#
+# Pinned to the BUILD host's platform and cross-compiled to the target: we
+# publish linux/amd64 + linux/arm64, and without this the Go toolchain itself
+# runs under QEMU for the foreign arch — minutes of emulation to produce a
+# binary the compiler can just cross-emit. CGO_ENABLED=0 is what makes that
+# free; keep it that way.
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+
+# Supplied by BuildKit. Empty under the legacy builder, which is fine: an empty
+# GOOS/GOARCH means "this host", i.e. a native build.
+ARG TARGETOS
+ARG TARGETARCH
 
 RUN apk add --no-cache git || true
 WORKDIR /app
@@ -17,7 +28,7 @@ COPY . .
 # module cache populated by `go mod download` above is all the
 # compiler needs. This was the original "vendor out of sync" error
 # operators saw when cloning the public repo.
-RUN CGO_ENABLED=0 GOOS=linux go build -o indexer ./cmd/agent
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o indexer ./cmd/agent
 
 # Stage 2: Build parpar native C++ addon (needs python3 + build tools for node-gyp)
 FROM node:22-alpine AS parpar-builder
