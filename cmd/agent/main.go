@@ -2038,7 +2038,19 @@ func processTask(cfg *config.Config, site client.Site, task *client.AgentTask, r
 		// trip the threshold alone if E10-E12 happened to be very
 		// large (in fact it WAS enough — but on subtler losses,
 		// per-file would catch what bytes wouldn't).
-		expectedFiles := session.ExpectedFiles()
+		// Files this pipeline deleted on purpose are not evidence of a broken
+		// download. RemoveBlockedFiles ran back at Step 3 and stripped every
+		// blocklisted extension (.bat, .exe, .iso, …) from downloadedPath, so
+		// demanding them here fails the task for doing exactly what it was told
+		// to do — and blames the download while doing it. The byte-total check
+		// below already allows for this (it is loosened to 80% precisely
+		// because "the pipeline legitimately deletes some files"); the per-file
+		// check just never got the same memo.
+		//
+		// Use the same OnlineBlocklist() the sweep used, so an operator's
+		// /agent/<id> override stays consistent across both.
+		declared := session.ExpectedFiles()
+		expectedFiles, skippedBlocked := services.ExpectedAfterBlocklist(declared, services.OnlineBlocklist())
 		var missing []string
 		var truncated []string
 		for _, ef := range expectedFiles {
@@ -2056,9 +2068,9 @@ func processTask(cfg *config.Config, site client.Site, task *client.AgentTask, r
 						ef.Path, float64(fi.Size())/float64(ef.Size)*100, ef.Size))
 			}
 		}
-		if len(expectedFiles) > 0 {
-			log.Printf("[%d] Step 4: pre-stage file check — torrent declared %d file(s); on disk: %d ok, %d missing, %d truncated",
-				rid, len(expectedFiles),
+		if len(declared) > 0 {
+			log.Printf("[%d] Step 4: pre-stage file check — torrent declared %d file(s); %d blocklisted (removed at Step 3, not expected on disk); of the remaining %d: %d ok, %d missing, %d truncated",
+				rid, len(declared), skippedBlocked, len(expectedFiles),
 				len(expectedFiles)-len(missing)-len(truncated),
 				len(missing), len(truncated))
 		}
@@ -2073,8 +2085,8 @@ func processTask(cfg *config.Config, site client.Site, task *client.AgentTask, r
 				return strings.Join(items[:5], ", ") + fmt.Sprintf(", … +%d more", len(items)-5)
 			}
 			err := fmt.Errorf(
-				"pre-stage file check failed: torrent declared %d file(s), %d missing + %d truncated. Missing: [%s]. Truncated: [%s]. Likely disk_reserve_sweep race (fixed in 1.5.24) or partial download — re-poll the task or check /admin/errors",
-				len(expectedFiles), len(missing), len(truncated),
+				"pre-stage file check failed: torrent declared %d file(s) (%d blocklisted and excluded), %d missing + %d truncated. Missing: [%s]. Truncated: [%s]. Blocklisted extensions are removed at Step 3 and are NOT counted here, so this is a genuine download problem: a disk_reserve_sweep race (fixed in 1.5.24) or a partial download — re-poll the task or check /admin/errors",
+				len(declared), skippedBlocked, len(missing), len(truncated),
 				capList(missing), capList(truncated))
 			fail("Prepare", "Pre-stage file check failed", err)
 			return

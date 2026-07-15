@@ -227,6 +227,35 @@ func RemoveBlockedFiles(dir string, blocklist map[string]bool) (int, map[string]
 	return removed, byExt
 }
 
+// ExpectedAfterBlocklist filters a torrent's declared file list down to the
+// files that should still exist on disk once RemoveBlockedFiles has run,
+// returning the survivors and the count excluded.
+//
+// It lives beside RemoveBlockedFiles deliberately: the two are halves of one
+// fact — what we delete, and what we therefore must not expect. They were
+// apart, and drifted. The online task path swept the blocklist at Step 3 and
+// then ran a per-file pre-stage check at Step 4 that demanded every declared
+// file, so any torrent shipping a .bat/.exe/.iso failed for doing exactly what
+// it was told to: "torrent declared 24 file(s), 2 missing" naming the two .bat
+// files the agent had just deleted itself. The error even blamed a
+// disk_reserve_sweep race and a partial download. The byte-total check nearby
+// already allowed for the sweep (loosened to 80% for this exact reason); the
+// per-file check simply never learned.
+func ExpectedAfterBlocklist(files []ExpectedFile, blocked map[string]bool) (keep []ExpectedFile, excluded int) {
+	if blocked == nil {
+		blocked = DefaultBlockedExtensions
+	}
+	keep = make([]ExpectedFile, 0, len(files))
+	for _, f := range files {
+		if blocked[strings.ToLower(filepath.Ext(f.Path))] {
+			excluded++
+			continue
+		}
+		keep = append(keep, f)
+	}
+	return keep, excluded
+}
+
 // FormatExtCounts renders a per-extension count map as a short,
 // human-readable string sorted by count desc, ext asc — e.g.
 // `.iso×3, .bat×1`. Returns "" for an empty/nil map so callers can
