@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,27 +39,46 @@ func SetPAR2Method(m string) {
 	par2Forced = strings.TrimSpace(m)
 }
 
-// par2MethodLadder is probed in descending order of expected throughput; the
-// first kernel that actually runs on this CPU wins.
+// par2MethodLadderFor returns the parpar kernels worth probing on goarch, in
+// descending order of expected throughput; the first that actually runs on this
+// CPU wins.
 //
-// It exists because "the CPU supports this instruction set" and "this kernel
-// runs on this CPU" turned out to be different claims. Production is a Xeon
-// Gold 6140 (Skylake-SP): parpar's own detection correctly picks Shuffle
-// (AVX512), which the CPU implements, and the kernel dies on SIGILL regardless.
-// Since the agent is fleet software running on hardware we don't control, the
-// only trustworthy answer is empirical — ask the machine, don't infer.
+// The ladder exists because "the CPU supports this instruction set" and "this
+// kernel runs on this CPU" turned out to be different claims. Production is a
+// Xeon Gold 6140 (Skylake-SP): parpar's own detection correctly picks Shuffle
+// (AVX512), which the CPU implements, and the kernel takes SIGILL regardless.
+// This is fleet software on hardware we do not control, so the only trustworthy
+// answer is empirical — ask the machine, don't infer.
 //
-// "" first: parpar's auto-select is the best choice wherever it works, and it
-// tunes more than we can express here (loop tiling, thread count).
-var par2MethodLadder = []string{
-	"",               // parpar's own auto-select
-	"xorjit-avx512",  // AVX512BW
-	"shuffle-avx512", // AVX512BW
-	"xorjit-avx2",    // AVX2
-	"shuffle-avx2",   // AVX2
-	"shuffle-sse",    // SSSE3
-	"lookup",         // scalar; no SIMD, runs anywhere
+// It is per-arch because parpar's method names are: shuffle-avx2 does not exist
+// on ARM, shuffle-neon does not exist on x86. We publish linux/amd64 and
+// linux/arm64 from one tree, so probing one arch's names on another would burn
+// a real par2 run per entry and then land on the scalar kernel — skipping the
+// vector unit that arch does have. Wrong answer, arrived at slowly.
+//
+// "" (parpar's own auto-select) leads on every arch: it is CPU-aware and tunes
+// loop tiling and thread count beyond anything expressible here, so it is the
+// right answer wherever the kernel it picks isn't broken. Entries after it are
+// the pathological path only — they need to be valid for the arch and to end in
+// a kernel with no SIMD at all, so every CPU has a floor.
+func par2MethodLadderFor(goarch string) []string {
+	switch goarch {
+	case "amd64", "386":
+		return []string{"", "xorjit-avx512", "shuffle-avx512", "xorjit-avx2", "shuffle-avx2", "shuffle-sse", "lookup"}
+	case "arm64":
+		return []string{"", "clmul-sve2", "shuffle128-sve2", "clmul-neon", "shuffle-neon", "lookup"}
+	case "arm": // ARMv7: NEON only, no SVE
+		return []string{"", "clmul-neon", "shuffle-neon", "lookup"}
+	case "riscv64":
+		return []string{"", "clmul-rvv", "shuffle128-rvv", "lookup"}
+	default:
+		// An arch parpar has no vector kernels for (or one we haven't taught
+		// this list). Auto-select, then scalar. Never guess a method name.
+		return []string{"", "lookup"}
+	}
 }
+
+func par2MethodLadder() []string { return par2MethodLadderFor(runtime.GOARCH) }
 
 // par2Binary resolves, once, which par2 implementation to use.
 //
@@ -110,7 +130,7 @@ func resolveParparMethod() (string, error) {
 	forced := par2Forced
 	par2ForcedMu.Unlock()
 
-	ladder := par2MethodLadder
+	ladder := par2MethodLadder()
 	if forced != "" {
 		ladder = []string{forced} // operator's call: no silent second-guessing
 	}

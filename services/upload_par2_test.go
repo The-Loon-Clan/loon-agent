@@ -2,6 +2,7 @@ package services
 
 import (
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -22,25 +23,85 @@ func TestSmokePAR2AcceptsWorkingBinary(t *testing.T) {
 	}
 }
 
-// The ladder must end in a method that needs no SIMD at all, or a CPU whose
-// vector kernels are all broken (prod's Xeon Gold 6140 is one) has nothing to
-// fall through to and loses parpar entirely.
-func TestPAR2MethodLadder(t *testing.T) {
-	if len(par2MethodLadder) == 0 {
-		t.Fatal("ladder is empty")
+// parpar's method names are architecture-specific, and we publish linux/amd64
+// AND linux/arm64 from this one tree. Offering an arch a kernel that cannot
+// exist there wastes a real par2 run per entry and lands on the scalar kernel,
+// skipping the vector unit that arch actually has.
+func TestPAR2MethodLadderPerArch(t *testing.T) {
+	// Substrings that only ever appear in one arch's parpar method names,
+	// per `parpar --help-full`.
+	x86 := []string{"sse", "avx", "vbmi", "affine", "gfni"}
+	arm := []string{"neon", "sve"}
+	riscv := []string{"rvv"}
+
+	cases := []struct {
+		goarch  string
+		allowed []string // substrings legal here
+		banned  []string // substrings that must not appear
+	}{
+		{"amd64", x86, append(append([]string{}, arm...), riscv...)},
+		{"386", x86, append(append([]string{}, arm...), riscv...)},
+		{"arm64", arm, append(append([]string{}, x86...), riscv...)},
+		{"arm", arm, append(append([]string{}, x86...), riscv...)},
+		{"riscv64", riscv, append(append([]string{}, x86...), arm...)},
+		// An arch we've taught nothing about must still be usable, not guessed at.
+		{"s390x", nil, append(append(append([]string{}, x86...), arm...), riscv...)},
 	}
-	if par2MethodLadder[0] != "" {
-		t.Errorf("ladder[0] = %q, want \"\" — parpar's own auto-select should be tried first, it tunes more than we can express", par2MethodLadder[0])
+
+	for _, tc := range cases {
+		t.Run(tc.goarch, func(t *testing.T) {
+			ladder := par2MethodLadderFor(tc.goarch)
+			if len(ladder) == 0 {
+				t.Fatal("empty ladder — this arch would have no par2 at all")
+			}
+			if ladder[0] != "" {
+				t.Errorf("ladder[0] = %q, want \"\" — parpar's own auto-select tunes more than we can express and should lead", ladder[0])
+			}
+			if last := ladder[len(ladder)-1]; last != "lookup" {
+				t.Errorf("ladder ends with %q, want \"lookup\" — the scalar kernel is the only floor guaranteed on any CPU", last)
+			}
+			seen := map[string]bool{}
+			for _, m := range ladder {
+				if seen[m] {
+					t.Errorf("duplicate entry %q — every probe costs a real par2 run", methodLabel(m))
+				}
+				seen[m] = true
+				for _, bad := range tc.banned {
+					if strings.Contains(m, bad) {
+						t.Errorf("%s ladder offers %q, which contains %q — that kernel does not exist on this arch", tc.goarch, m, bad)
+					}
+				}
+			}
+			// s390x legitimately has no vector entries; the rest should have some,
+			// or the ladder is pointless there.
+			if tc.allowed != nil {
+				vector := false
+				for _, m := range ladder {
+					for _, ok := range tc.allowed {
+						if strings.Contains(m, ok) {
+							vector = true
+						}
+					}
+				}
+				if !vector {
+					t.Errorf("%s ladder has no vector kernel — auto-select failing would drop straight to scalar", tc.goarch)
+				}
+			}
+		})
 	}
-	if last := par2MethodLadder[len(par2MethodLadder)-1]; last != "lookup" {
-		t.Errorf("ladder ends with %q, want \"lookup\" — the scalar kernel is the only one guaranteed to run on any CPU", last)
+}
+
+// The live ladder must be one of the per-arch lists, not something else.
+func TestPAR2MethodLadderUsesGOARCH(t *testing.T) {
+	got := par2MethodLadder()
+	want := par2MethodLadderFor(runtime.GOARCH)
+	if len(got) != len(want) {
+		t.Fatalf("par2MethodLadder() has %d entries, par2MethodLadderFor(%q) has %d", len(got), runtime.GOARCH, len(want))
 	}
-	seen := map[string]bool{}
-	for _, m := range par2MethodLadder {
-		if seen[m] {
-			t.Errorf("duplicate ladder entry %q — probes cost a real par2 run each", methodLabel(m))
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("entry %d: got %q, want %q", i, got[i], want[i])
 		}
-		seen[m] = true
 	}
 }
 
