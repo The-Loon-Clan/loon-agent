@@ -21,16 +21,36 @@ import (
 // lines to stdout. The callback fires from a background goroutine.
 type PAR2ProgressFunc func(phase string, pct float64)
 
-// par2Binary caches the resolved binary name at startup so we only probe once.
-// Prefers parpar (multi-threaded, 4-8x faster) over par2create (single-threaded).
-var par2Binary = detectPAR2Binary()
+var (
+	par2Once sync.Once
+	par2Bin  string
+)
+
+// par2Binary resolves, once, which par2 implementation to use.
+//
+// Deliberately lazy rather than a package-level initializer: the probe below
+// runs a real par2 job, and a mismatched parpar dies on SIGILL. Resolving at
+// init would fork that child before main() reaches disableCoreDumps(), and a
+// crash dump of a child in a content tree is exactly what published our NNTP
+// password to Usenet once already.
+func par2Binary() string {
+	par2Once.Do(func() { par2Bin = detectPAR2Binary() })
+	return par2Bin
+}
 
 func detectPAR2Binary() string {
 	// parpar is a parallel PAR2 implementation — dramatically faster on
-	// multi-core systems. If it's installed, use it.
+	// multi-core systems. If it's installed AND it runs here, use it.
 	if path, err := exec.LookPath("parpar"); err == nil {
-		log.Printf("PAR2: using parpar (%s) — multi-threaded", path)
-		return "parpar"
+		if err := smokePAR2("parpar"); err == nil {
+			log.Printf("PAR2: using parpar (%s) — multi-threaded", path)
+			return "parpar"
+		} else {
+			log.Printf("PAR2: parpar (%s) is installed but FAILED its smoke test (%v). "+
+				"Falling back to par2create — recovery data will still be generated, but "+
+				"single-threaded, and non-ASCII filenames may be mangled in the PAR2 header. "+
+				"A crash here means parpar's SIMD kernels do not match this CPU.", path, err)
+		}
 	}
 	if path, err := exec.LookPath("par2create"); err == nil {
 		log.Printf("PAR2: using par2create (%s) — single-threaded", path)
@@ -38,6 +58,54 @@ func detectPAR2Binary() string {
 	}
 	log.Println("PAR2: WARNING — no par2 binary found in PATH")
 	return "par2create" // will fail at exec time with a clear error
+}
+
+// smokePAR2 proves the binary can actually produce recovery data on THIS CPU,
+// rather than merely existing on it.
+//
+// LookPath alone is not enough. parpar dispatches hand-written SIMD kernels off
+// runtime CPU detection; a build whose kernels don't match the host takes SIGILL
+// the instant it reaches the GF16 hot path, while `parpar --version` still exits
+// 0 because it never executes one. So LookPath happily selected a binary that
+// failed every single job — and since par2 failure is non-fatal by design, every
+// release shipped to Usenet with no recovery at all and nothing looked broken.
+// Probing the real code path is the only check that would have caught it.
+func smokePAR2(bin string) error {
+	dir, err := os.MkdirTemp("", "par2probe")
+	if err != nil {
+		return fmt.Errorf("probe tempdir: %w", err)
+	}
+	defer os.RemoveAll(dir)
+
+	// Real data, not zeros: the kernels we need to exercise only run once
+	// there is something to compute over.
+	payload := make([]byte, 1<<20)
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "probe.bin"), payload, 0o644); err != nil {
+		return fmt.Errorf("probe file: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	opts := PAR2Options{Redundancy: 5, BlockSize: 64 * 1024}
+	var cmd *exec.Cmd
+	if bin == "parpar" {
+		cmd = buildParparCmd(ctx, dir, "probe", opts, []string{"probe.bin"})
+	} else {
+		cmd = buildPar2createCmd(ctx, dir, "probe", opts.Redundancy, opts.BlockSize, []string{"probe.bin"})
+	}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%v: %s", err, tailStr(string(out), 200))
+	}
+	// Exit 0 alone isn't proof — require recovery files on disk.
+	hits, _ := filepath.Glob(filepath.Join(dir, "probe*.par2"))
+	if len(hits) == 0 {
+		return fmt.Errorf("exited 0 but produced no .par2 files")
+	}
+	return nil
 }
 
 // maxPAR2Slices is the PAR2 specification's ceiling on input slices. Both
@@ -57,8 +125,9 @@ type PAR2Options struct {
 // Prefers parpar (multi-threaded) when available, falls back to par2create.
 // Returns the list of generated PAR2 file paths.
 func GeneratePAR2(ctx context.Context, dir string, baseName string, opts PAR2Options, progressFn PAR2ProgressFunc) ([]string, error) {
+	binary := par2Binary()
 	log.Printf("PAR2: GeneratePAR2 entry dir=%q baseName=%q redundancy=%d%% blockSize=%d threads=%d memMB=%d binary=%s",
-		dir, baseName, opts.Redundancy, opts.BlockSize, opts.Threads, opts.MemoryMB, par2Binary)
+		dir, baseName, opts.Redundancy, opts.BlockSize, opts.Threads, opts.MemoryMB, binary)
 	if opts.Redundancy <= 0 {
 		opts.Redundancy = 5
 	}
@@ -95,7 +164,7 @@ func GeneratePAR2(ctx context.Context, dir string, baseName string, opts PAR2Opt
 	}
 
 	log.Printf("PAR2: generating %d%% recovery for %d files (%.1f MB total), base=%s, binary=%s, slice=%dB",
-		opts.Redundancy, len(files), float64(totalSize)/1024/1024, baseName, par2Binary, opts.BlockSize)
+		opts.Redundancy, len(files), float64(totalSize)/1024/1024, baseName, binary, opts.BlockSize)
 
 	// 60-minute cap is a backstop, not a target — most PAR2 runs complete
 	// in seconds-to-minutes. Protects against a wedged par2create/parpar
@@ -104,7 +173,7 @@ func GeneratePAR2(ctx context.Context, dir string, baseName string, opts PAR2Opt
 	defer parCancel()
 
 	var cmd *exec.Cmd
-	if par2Binary == "parpar" {
+	if binary == "parpar" {
 		cmd = buildParparCmd(par2Ctx, dir, baseName, opts, files)
 	} else {
 		cmd = buildPar2createCmd(par2Ctx, dir, baseName, opts.Redundancy, opts.BlockSize, files)
@@ -138,7 +207,7 @@ func GeneratePAR2(ctx context.Context, dir string, baseName string, opts PAR2Opt
 	err = cmd.Wait()
 
 	if err != nil {
-		escalateToolCrash(par2Binary, dir, []byte(lastOutput.String()), err)
+		escalateToolCrash(binary, dir, []byte(lastOutput.String()), err)
 		log.Printf("PAR2 output:\n%s", lastOutput.String())
 		return nil, fmt.Errorf("par2 create failed: %w", err)
 	}

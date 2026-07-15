@@ -21,8 +21,21 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o indexer ./cmd/agent
 
 # Stage 2: Build parpar native C++ addon (needs python3 + build tools for node-gyp)
 FROM node:22-alpine AS parpar-builder
+# ParPar's binding.gyp applies -march=native on every non-Windows build; its
+# README states plainly that this makes the binary non-portable. We build on a
+# dev box and run on a server, so take upstream's documented switch for a
+# redistributable build. Per-ISA kernels keep their own explicit
+# -mavx2/-mavx512bw/-mgfni flags and runtime dispatch, so the target still gets
+# the fastest kernel it can run; only build-host tuning is given up.
+#
+# NB: this is hygiene, NOT the fix for the Skylake-SP SIGILL — measured, native
+# tuning only adds BMI2 + VEX-encoded SSE, all of which Skylake-SP implements.
+# The agent's par2 smoke test is what actually contains that failure.
+#
+# Pinned because an unpinned rebuild silently re-rolls the toolchain dice.
+ENV npm_config_enable_native_tuning=0
 RUN apk add --no-cache python3 make g++ && \
-    npm install -g @animetosho/parpar && \
+    npm install -g @animetosho/parpar@0.4.5 && \
     npm cache clean --force && \
     parpar --version
 

@@ -1,6 +1,25 @@
 package services
 
-import "testing"
+import (
+	"os/exec"
+	"testing"
+)
+
+// smokePAR2 must not reject a binary that actually works — a false negative
+// silently downgrades every release to the slower, CJK-mangling par2create.
+// Skips where the binary isn't installed (dev boxes); runs in the container.
+func TestSmokePAR2AcceptsWorkingBinary(t *testing.T) {
+	for _, bin := range []string{"parpar", "par2create"} {
+		t.Run(bin, func(t *testing.T) {
+			if _, err := exec.LookPath(bin); err != nil {
+				t.Skipf("%s not installed here", bin)
+			}
+			if err := smokePAR2(bin); err != nil {
+				t.Errorf("smokePAR2(%q) = %v, want nil — the probe rejects a binary that is present and expected to work", bin, err)
+			}
+		})
+	}
+}
 
 // fitBlockSize guards the ceiling that shipped the 33GB "Nausicaa" remux to
 // Usenet with no recovery at all: callers hand in the 700KB Usenet article
