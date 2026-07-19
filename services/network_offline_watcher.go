@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ameNZB/loon-agent/storage"
+	"github.com/the-loon-clan/loon-agent/storage"
 )
 
 const (

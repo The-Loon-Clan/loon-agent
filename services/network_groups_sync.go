@@ -5,8 +5,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/ameNZB/loon-agent/client"
-	"github.com/ameNZB/loon-agent/storage"
+	"github.com/the-loon-clan/loon-agent/client"
+	"github.com/the-loon-clan/loon-agent/storage"
 )
 
 // siteGroupsPollInterval is how often we pull the site's catalog when

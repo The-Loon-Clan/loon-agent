@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ameNZB/loon-agent/storage"
+	"github.com/the-loon-clan/loon-agent/storage"
 )
 
 // TestPageTemplatesRender exercises every page template with a plausible

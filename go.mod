@@ -1,4 +1,4 @@
-module github.com/ameNZB/loon-agent
+module github.com/the-loon-clan/loon-agent
 
 go 1.25.0
 

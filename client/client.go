@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ameNZB/loon-agent/config"
+	"github.com/the-loon-clan/loon-agent/config"
 	"github.com/google/uuid"
 	"io"
 	"log"

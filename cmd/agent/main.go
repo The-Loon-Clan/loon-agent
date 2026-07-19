@@ -17,11 +17,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ameNZB/loon-agent/client"
-	"github.com/ameNZB/loon-agent/config"
-	"github.com/ameNZB/loon-agent/services"
-	"github.com/ameNZB/loon-agent/storage"
-	"github.com/ameNZB/loon-agent/utils"
+	"github.com/the-loon-clan/loon-agent/client"
+	"github.com/the-loon-clan/loon-agent/config"
+	"github.com/the-loon-clan/loon-agent/services"
+	"github.com/the-loon-clan/loon-agent/storage"
+	"github.com/the-loon-clan/loon-agent/utils"
 )
 
 // ── Live status: aggregated across all concurrent tasks ─────────────────────

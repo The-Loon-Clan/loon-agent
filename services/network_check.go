@@ -1,8 +1,8 @@
 package services
 
 import (
-	"github.com/ameNZB/loon-agent/config"
-	"github.com/ameNZB/loon-agent/storage"
+	"github.com/the-loon-clan/loon-agent/config"
+	"github.com/the-loon-clan/loon-agent/storage"
 	"io"
 	"log"
 	"net/http"

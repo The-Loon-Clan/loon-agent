@@ -3,7 +3,7 @@ package client
 import (
 	"time"
 
-	"github.com/ameNZB/loon-agent/config"
+	"github.com/the-loon-clan/loon-agent/config"
 )
 
 // Site is the contract the agent expects from whatever indexer it

@@ -3,7 +3,7 @@ package services
 import (
 	"html/template"
 
-	"github.com/ameNZB/loon-agent/storage"
+	"github.com/the-loon-clan/loon-agent/storage"
 )
 
 // The local UI uses one layout template with a sidebar + top bar, and each

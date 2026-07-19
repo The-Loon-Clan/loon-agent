@@ -28,7 +28,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ameNZB/loon-agent/client"
+	"github.com/the-loon-clan/loon-agent/client"
 )
 
 // CollectionItem is one file the scanner found + (optionally) its

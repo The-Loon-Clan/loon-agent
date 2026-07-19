@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ameNZB/loon-agent/storage"
+	"github.com/the-loon-clan/loon-agent/storage"
 )
 
 // resetGlobalState wipes the package-global GlobalState.Jobs map so

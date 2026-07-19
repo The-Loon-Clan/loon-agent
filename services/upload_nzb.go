@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
-	"github.com/ameNZB/loon-agent/config"
+	"github.com/the-loon-clan/loon-agent/config"
 	"log"
 	"os"
 	"strings"
