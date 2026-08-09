@@ -19,23 +19,64 @@ type OfferPathRow struct {
 	LastSeenAt time.Time
 }
 
-// UpsertOfferPath records (or refreshes) the hash → path mapping.
-// Called per file during the sync scan. Re-running with the same
-// hash + a different path moves the cache entry; same hash + same
-// path just bumps last_seen_at.
+// OfferSourceRow is everything the fulfill loop can use to get hold of a
+// bucket's bytes: a local file, a remote .torrent, or both. Empty strings
+// mean "no route of this kind".
+type OfferSourceRow struct {
+	LocalPath   string
+	TorrentURL  string
+	SourceShort string // tracker short_name — picks the cookie jar at fetch time
+	SizeBytes   int64
+}
+
+// UpsertOfferPath records (or refreshes) the hash → local-path mapping.
 func (db *DB) UpsertOfferPath(hash, path string, size int64) error {
-	if hash == "" || path == "" {
+	return db.UpsertOfferSource(hash, path, "", "", size)
+}
+
+// UpsertOfferRemote records (or refreshes) the hash → .torrent-URL mapping
+// for a scraped tracker release with no local copy.
+func (db *DB) UpsertOfferRemote(hash, torrentURL, sourceShort string, size int64) error {
+	return db.UpsertOfferSource(hash, "", torrentURL, sourceShort, size)
+}
+
+// UpsertOfferSource is the full form. Per-column fill rather than row
+// overwrite: one bucket can be reachable both locally and remotely, and the
+// two facts are learned by different passes — a plain overwrite would mean
+// whichever ran last erased the other route. An empty argument therefore
+// means "I learned nothing about this route", never "clear it".
+func (db *DB) UpsertOfferSource(hash, path, torrentURL, sourceShort string, size int64) error {
+	if hash == "" || (path == "" && torrentURL == "") {
 		return nil
 	}
 	_, err := db.Exec(`
-		INSERT INTO offer_paths (offer_hash, local_path, size_bytes, last_seen_at)
-		VALUES (?, ?, ?, ?)
+		INSERT INTO offer_paths (offer_hash, local_path, torrent_url, source_short, size_bytes, last_seen_at)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(offer_hash) DO UPDATE SET
-		    local_path   = excluded.local_path,
+		    local_path   = CASE WHEN excluded.local_path   != '' THEN excluded.local_path   ELSE offer_paths.local_path   END,
+		    torrent_url  = CASE WHEN excluded.torrent_url  != '' THEN excluded.torrent_url  ELSE offer_paths.torrent_url  END,
+		    source_short = CASE WHEN excluded.source_short != '' THEN excluded.source_short ELSE offer_paths.source_short END,
 		    size_bytes   = excluded.size_bytes,
 		    last_seen_at = excluded.last_seen_at`,
-		hash, path, size, time.Now().UTC().Format(time.RFC3339))
+		hash, path, torrentURL, sourceShort, size, time.Now().UTC().Format(time.RFC3339))
 	return err
+}
+
+// GetOfferSource returns every route known for a hash. A zero-value row with
+// a nil error means the agent has no way to serve this bucket.
+func (db *DB) GetOfferSource(hash string) (OfferSourceRow, error) {
+	var row OfferSourceRow
+	if hash == "" {
+		return row, nil
+	}
+	err := db.QueryRow(
+		`SELECT local_path, torrent_url, source_short, size_bytes
+		   FROM offer_paths WHERE offer_hash = ?`, hash,
+	).Scan(&row.LocalPath, &row.TorrentURL, &row.SourceShort, &row.SizeBytes)
+	if err == sql.ErrNoRows {
+		return OfferSourceRow{}, nil
+	}
+	return row, err
 }
 
 // GetOfferPath returns the local path the offer-fulfill service

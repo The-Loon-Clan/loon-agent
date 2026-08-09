@@ -115,6 +115,22 @@ type Config struct {
 	// sources to refresh registrations. Cheap when nothing changed
 	// (heartbeat path), expensive on first run. Default 60.
 	OfferSyncIntervalMin int
+	// OfferRemoteFulfill allows fulfilling a request by DOWNLOADING from the
+	// source tracker when the file is not already on disk. Off by default,
+	// and deliberately so: it spends the operator's bandwidth and their
+	// tracker ratio, which is not a decision an agent should make for them
+	// by merely being upgraded.
+	OfferRemoteFulfill bool
+	// OfferRemoteMaxGB refuses a remote fulfillment whose torrent is larger
+	// than this. The download must also fit the disk pre-flight, which is
+	// enforced separately by the torrent path; this is the operator's
+	// "never spend more than this on one request" ceiling. 0 = no ceiling.
+	OfferRemoteMaxGB int
+	// OfferRemoteTimeoutMin bounds one remote fulfillment end to end. A
+	// download that cannot finish inside it is abandoned and the request is
+	// failed back so another offerer can try — better than holding a claim
+	// alive indefinitely against a dead swarm.
+	OfferRemoteTimeoutMin int
 
 	// Layered holds the yml/env/web tiers for settings that are tunable via
 	// the site or local web UI. The fields above continue to be populated
@@ -157,7 +173,7 @@ func newConfigFromLayered(l *Layered) *Config {
 		return fallback
 	}
 	return &Config{
-		Layered: l,
+		Layered:                l,
 		SiteURL:                getEnv("SITE_URL", ""),
 		AgentToken:             getEnv("AGENT_TOKEN", ""),
 		PollInterval:           getEnvAsInt("POLL_INTERVAL", 30),
@@ -195,6 +211,9 @@ func newConfigFromLayered(l *Layered) *Config {
 		OfferEnabled:           getEnv("OFFER_ENABLED", "false") == "true",
 		OfferConfigPath:        getEnv("OFFER_CONFIG", filepath.Join(getEnv("CONFIG_DIR", "."), "offer.json")),
 		OfferSyncIntervalMin:   getEnvAsInt("OFFER_SYNC_INTERVAL_MIN", 60),
+		OfferRemoteFulfill:     getEnv("OFFER_REMOTE_FULFILL", "false") == "true",
+		OfferRemoteMaxGB:       getEnvAsInt("OFFER_REMOTE_MAX_GB", 25),
+		OfferRemoteTimeoutMin:  getEnvAsInt("OFFER_REMOTE_TIMEOUT_MIN", 240),
 	}
 }
 

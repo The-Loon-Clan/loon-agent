@@ -137,16 +137,18 @@ func (s *OfferSyncService) syncOne(ctx context.Context, src OfferSource) error {
 // syncScraper runs a tracker scrape + optionally pairs against a
 // local downloads folder for fulfillment readiness:
 //
-//   1. Look up the scraper in the registry by src.ShortName.
-//   2. Construct + Scan — gets the remote release list.
-//   3. If src.DownloadsRoot is set, walk it and match scraped
-//      releases to local files by normalised filename.
-//   4. For matched entries: resolve titles via the site + register
-//      offers + cache hash→path for fulfillment.
-//   5. For unmatched scraped entries (no local file): register the
-//      offer anyway with no path cached. Fulfillment will skip them
-//      until a torrent-delivery path is wired (Phase 4) or the
-//      operator pairs a downloads_root.
+//  1. Look up the scraper in the registry by src.ShortName.
+//  2. Construct + Scan — gets the remote release list.
+//  3. If src.DownloadsRoot is set, walk it and match scraped
+//     releases to local files by normalised filename.
+//  4. For matched entries: resolve titles via the site + register
+//     offers + cache hash→path for fulfillment.
+//  5. For unmatched scraped entries (no local file): register the
+//     offer anyway and cache the .torrent URL, so the fulfill loop can
+//     serve it by DOWNLOADING from the source when the operator has
+//     enabled remote fulfillment. Before that URL was persisted these
+//     offers were permanently undeliverable — every request against one
+//     reopened on the claim timeout forever.
 //
 // info_hash flows through to UpsertOffer so the fulfill loop's
 // auto-resolve path lights up for tracker-sourced offers.
@@ -232,13 +234,18 @@ func (s *OfferSyncService) syncScraper(ctx context.Context, src OfferSource) err
 			}
 			_ = row // row presently only used to seed season/episode
 
-			// Cache hash → path when we found the file locally.
-			if s.db != nil && localPath != "" {
+			// Cache every route we know to this bucket: the local file when
+			// the pairing found one, and the .torrent URL so a request can
+			// still be fulfilled when it did not. Storing only the local
+			// path is what made tracker-sourced offers undeliverable —
+			// their requests reopened every 15 minutes forever because
+			// fulfill had nothing to look up.
+			if s.db != nil && (localPath != "" || rel.TorrentURL != "") {
 				hash := ComputeOfferHash(
 					resolved[k].EntityType, resolved[k].EntityID,
 					season, episode, resLower, srcLower)
-				if err := s.db.UpsertOfferPath(hash, localPath, sizeBytes); err != nil {
-					log.Printf("[offer] cache path failed for %s: %v", localPath, err)
+				if err := s.db.UpsertOfferSource(hash, localPath, rel.TorrentURL, src.ShortName, sizeBytes); err != nil {
+					log.Printf("[offer] cache source failed for %s: %v", rel.RawTitle, err)
 				}
 			}
 			entries = append(entries, client.OfferEntry{

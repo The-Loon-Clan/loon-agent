@@ -29,6 +29,11 @@ type OfferFulfillService struct {
 	cfg  *config.Config
 	site *client.SiteClient
 	db   *storage.DB
+	// loaded is the same offer.json the sync service reads. Needed here for
+	// the cookie jar and browser identity a remote .torrent fetch has to
+	// present; a parse failure is NOT fatal for fulfillment (the local-file
+	// route needs none of it), so this may be nil.
+	loaded *OfferConfig
 }
 
 // NewOfferFulfillService returns (nil, nil) when the feature is off
@@ -37,7 +42,14 @@ func NewOfferFulfillService(cfg *config.Config, site *client.SiteClient, db *sto
 	if !cfg.OfferEnabled {
 		return nil
 	}
-	return &OfferFulfillService{cfg: cfg, site: site, db: db}
+	// Best-effort: the sync service already reports a bad offer.json loudly
+	// at boot, and refusing to start the fulfill loop over it would take the
+	// working local-file route down with the broken remote one.
+	loaded, err := LoadOfferConfig(cfg.OfferConfigPath)
+	if err != nil {
+		log.Printf("[offer-fulfill] offer config unreadable (%v) — remote fulfillment unavailable", err)
+	}
+	return &OfferFulfillService{cfg: cfg, site: site, db: db, loaded: loaded}
 }
 
 // Start runs the fulfill loop in a background goroutine. Default
@@ -91,23 +103,37 @@ func (s *OfferFulfillService) runOnce(ctx context.Context) {
 
 func (s *OfferFulfillService) fulfillOne(ctx context.Context, r client.OfferPendingRequest) {
 	rid := int(r.ID)
-	// 1. Look up the local file via hash→path cache.
-	localPath, err := s.db.GetOfferPath(r.OfferHash)
+	// 1. Work out how — if at all — we can serve this bucket.
+	src, err := s.db.GetOfferSource(r.OfferHash)
 	if err != nil {
 		log.Printf("[offer-fulfill #%d] cache lookup error: %v", rid, err)
 		return
 	}
-	if localPath == "" {
-		log.Printf("[offer-fulfill #%d] no cached path for hash %s — skipping", rid, r.OfferHash[:12])
+	route := chooseFulfillRoute(src, s.cfg)
+	switch route {
+	case fulfillRouteNone:
+		log.Printf("[offer-fulfill #%d] no route for hash %s — skipping", rid, shortHash(r.OfferHash))
 		return
-	}
-	fi, err := os.Stat(localPath)
-	if err != nil {
-		log.Printf("[offer-fulfill #%d] file gone (%s): %v — skipping", rid, localPath, err)
+	case fulfillRouteRemoteDisabled:
+		// Say it once per encounter rather than silently doing nothing: an
+		// operator wondering why a request never fills should find the
+		// reason in the log next to the request id.
+		log.Printf("[offer-fulfill #%d] only a remote source (%s) and OFFER_REMOTE_FULFILL is off — skipping",
+			rid, src.SourceShort)
 		return
 	}
 
-	// 2. Claim.
+	localPath := src.LocalPath
+	if route == fulfillRouteLocal {
+		if _, err := os.Stat(localPath); err != nil {
+			log.Printf("[offer-fulfill #%d] file gone (%s): %v — skipping", rid, localPath, err)
+			return
+		}
+	}
+
+	// 2. Claim. Always before any expensive work — a remote fulfillment
+	// spends bandwidth and tracker ratio, and doing that for a request
+	// another offerer already owns wastes both.
 	got, err := s.site.OfferClaim(rid)
 	if err != nil {
 		log.Printf("[offer-fulfill #%d] claim error: %v", rid, err)
@@ -117,7 +143,7 @@ func (s *OfferFulfillService) fulfillOne(ctx context.Context, r client.OfferPend
 		// Another offerer beat us — fine, move on.
 		return
 	}
-	log.Printf("[offer-fulfill #%d] claimed; file=%s (%d bytes)", rid, localPath, fi.Size())
+	log.Printf("[offer-fulfill #%d] claimed via %s route", rid, route)
 
 	// Helper closure: any failure path after claim should /fail the
 	// request so it reopens for other offerers + bumps our
@@ -130,30 +156,49 @@ func (s *OfferFulfillService) fulfillOne(ctx context.Context, r client.OfferPend
 		}
 	}
 
-	// 3. Stage the file in a fresh temp dir. UploadDirectory walks
-	// the dir and uploads every file — for an offer fulfillment we
-	// only have one. Symlink first (no copy cost), fall back to
-	// copy if cross-device or otherwise refused.
 	jobName := fmt.Sprintf("offer-%d", rid)
-	stageDir, err := os.MkdirTemp(s.cfg.TempDir, jobName+"-")
-	if err != nil {
-		failRequest("stage-mkdir", err)
-		return
-	}
-	defer os.RemoveAll(stageDir)
-	staged := filepath.Join(stageDir, filepath.Base(localPath))
-	if err := os.Symlink(localPath, staged); err != nil {
-		// Symlink not supported (Windows non-admin, exotic FS) — copy.
-		if cerr := copyFile(localPath, staged); cerr != nil {
-			failRequest("stage-copy", cerr)
+
+	// 3. Get the bytes into a directory UploadDirectory can walk. Two
+	// routes converge here: a local file is symlinked (or copied) into a
+	// fresh staging dir, while a remote source is downloaded — and the
+	// download's own data directory IS that directory, multi-file torrents
+	// included, so nothing is staged twice.
+	var uploadDir, releaseName string
+	if route == fulfillRouteRemote {
+		// The claim TTL is 15 minutes and this download is not; keep the
+		// claim alive for as long as we are genuinely working on it. The
+		// site treats a re-claim by the holder as an extension.
+		stopKeepalive := s.keepClaimAlive(ctx, rid)
+		dir, name, err := s.downloadRemote(ctx, rid, src, jobName)
+		stopKeepalive()
+		if err != nil {
+			failRequest("remote-download", err)
 			return
 		}
+		defer os.RemoveAll(dir)
+		uploadDir, releaseName = dir, name
+	} else {
+		stageDir, err := os.MkdirTemp(s.cfg.TempDir, jobName+"-")
+		if err != nil {
+			failRequest("stage-mkdir", err)
+			return
+		}
+		defer os.RemoveAll(stageDir)
+		staged := filepath.Join(stageDir, filepath.Base(localPath))
+		if err := os.Symlink(localPath, staged); err != nil {
+			// Symlink not supported (Windows non-admin, exotic FS) — copy.
+			if cerr := copyFile(localPath, staged); cerr != nil {
+				failRequest("stage-copy", cerr)
+				return
+			}
+		}
+		uploadDir, releaseName = stageDir, filepath.Base(localPath)
 	}
 
 	// 4. Upload to Usenet. Same path the task-driven pipeline uses,
 	// minus the post-download media transforms — for personal-source
 	// fulfillment we ship the bits as-is.
-	fileSegments, err := UploadDirectory(ctx, s.cfg, stageDir, filepath.Base(localPath), jobName)
+	fileSegments, err := UploadDirectory(ctx, s.cfg, uploadDir, releaseName, jobName)
 	if err != nil {
 		failRequest("upload", err)
 		return
@@ -163,7 +208,7 @@ func (s *OfferFulfillService) fulfillOne(ctx context.Context, r client.OfferPend
 	// site's ingest path can correlate even when the agent name is
 	// the only other hint.
 	nzbData, err := CreateMultiFileNZBBytes(s.cfg, fileSegments, "", NZBMetaInfo{
-		Title:     filepath.Base(localPath),
+		Title:     releaseName,
 		RequestID: r.ID,
 	})
 	if err != nil {
@@ -173,7 +218,7 @@ func (s *OfferFulfillService) fulfillOne(ctx context.Context, r client.OfferPend
 
 	// 6. Ship to the site — single round-trip handles both ingest
 	// (creates nzbs row) and deliver (closes offer_request).
-	uploadName := filepath.Base(localPath) + ".nzb"
+	uploadName := releaseName + ".nzb"
 	resp, err := s.site.OfferUploadNZB(rid, uploadName, nzbData, "")
 	if err != nil {
 		failRequest("upload-nzb", err)
