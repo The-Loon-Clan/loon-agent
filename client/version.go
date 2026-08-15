@@ -40,6 +40,24 @@ const AgentProtocolVersion = 3
 // AgentProtocolVersion's job — but useful for debugging which agents in the
 // field have picked up a release.
 //
+// 1.5.31 — inventory reporting, and an episode-parsing fix that mattered
+//	more than it looked.
+//
+//	The agent can now report its library TREE to the site
+//	(/api/agent/offer/inventory) instead of deciding for itself what to
+//	publish. Reporting publishes nothing: the site renders the tree and
+//	the operator selects what becomes an offer. Off by default
+//	(INVENTORY_ENABLED), because it discloses every filename on the
+//	configured roots. Uses the agent's ORDINARY token — no extra scope,
+//	since a report that publishes nothing needs no extra privilege.
+//
+//	The parse fix: "[SubsPlease] Dr. Stone S3 - 07" matched neither the
+//	S01E07 nor the ep07 form, so season and episode both came back zero.
+//	Those two values are part of the offer bucket identity, so EVERY
+//	episode of a season hashed to one bucket — publishing a twelve-episode
+//	season created a single offer. Affects the pre-existing register path
+//	too, not just inventory.
+//
 // 1.5.30 — agent disk-leak audit (AUDIT-2026-07-opus-4.8): four fixes that
 //	stop the agent accumulating disk + phantom reservation while it
 //	otherwise looks idle, so it no longer needs a daily restart to
@@ -1095,4 +1113,4 @@ const AgentProtocolVersion = 3
 //	per-file Size + Transferred populated, ProgressCallback
 //	signature carries total/transferred bytes, opt-in cache
 //	hit before DHT.
-const AgentVersion = "1.5.30"
+const AgentVersion = "1.5.31"
