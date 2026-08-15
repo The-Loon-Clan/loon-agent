@@ -824,6 +824,18 @@ func main() {
 		log.Printf("[offer] sync service started (interval=%dm config=%s)",
 			cfg.OfferSyncIntervalMin, cfg.OfferConfigPath)
 	}
+	// Inventory reporting. Independent of OFFER_ENABLED: reporting the tree
+	// publishes nothing, so an operator can browse what they HAVE on the site
+	// without listing any of it as an offer. Roots fall back to the folder
+	// sources in offer.json, which is why the config is loaded here even when
+	// offer-sync itself is disabled.
+	if inv, err := services.NewInventoryService(cfg, site, services.LoadOfferConfigQuiet(cfg.OfferConfigPath)); err != nil {
+		log.Fatalf("inventory config: %v", err)
+	} else if inv != nil {
+		inv.Start(ctx)
+		log.Printf("[inventory] service started (interval=%dm min=%dMB max=%d)",
+			cfg.InventoryIntervalMin, cfg.InventoryMinMB, cfg.InventoryMaxFiles)
+	}
 	// Fulfill loop — paired with sync. Polls /api/agent/offer/
 	// requests/pending and walks claim→deliver/fail. Phase 3a stubs
 	// the deliver step; 3b plugs the upload pipeline in.

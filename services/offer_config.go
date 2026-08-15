@@ -82,6 +82,21 @@ type OfferSource struct {
 // LoadOfferConfig reads + parses the offer config file. Missing file
 // is not an error — returns an empty config so the caller can treat
 // "no offers declared yet" uniformly. Other I/O / parse errors bubble.
+// LoadOfferConfigQuiet is LoadOfferConfig for callers that only want the file
+// as a HINT rather than as their configuration.
+//
+// The inventory service reads it to discover folder roots when INVENTORY_ROOTS
+// is unset. A malformed offer.json is a fatal error for offer-sync, which is
+// governed by it — but it must not stop inventory reporting, which merely
+// looked. Returns an empty config rather than nil so callers need no nil check.
+func LoadOfferConfigQuiet(path string) *OfferConfig {
+	cfg, err := LoadOfferConfig(path)
+	if err != nil || cfg == nil {
+		return &OfferConfig{}
+	}
+	return cfg
+}
+
 func LoadOfferConfig(path string) (*OfferConfig, error) {
 	if path == "" {
 		return &OfferConfig{}, nil

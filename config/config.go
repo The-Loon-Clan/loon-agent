@@ -132,6 +132,31 @@ type Config struct {
 	// alive indefinitely against a dead swarm.
 	OfferRemoteTimeoutMin int
 
+	// ── Inventory reporting (gated by INVENTORY_ENABLED) ────────────
+	//
+	// Ships the library TREE to the site so the operator can browse it and
+	// choose what to offer. Distinct from OFFER_ENABLED, which publishes
+	// offers directly. Off by default and deliberately opt-in: it sends a
+	// list of every filename on the configured roots, which is more than an
+	// operator might expect an "offer" feature to disclose.
+	InventoryEnabled bool
+	// InventoryRoots is a comma-separated list of directories to walk. Empty
+	// falls back to the folder sources declared in offer.json, so a library
+	// already described there needs no second declaration.
+	InventoryRoots string
+	// InventoryIntervalMin controls how often the tree is re-reported.
+	// Default 6h: a library changes far more slowly than an offer list, and
+	// each walk costs the site a title resolution per file.
+	InventoryIntervalMin int
+	// InventoryMinMB drops sidecar noise (.srt, artwork, sample stubs) that
+	// would otherwise bury the episodes in the rendered tree. A legibility
+	// floor, not a policy one — 0 reports everything.
+	InventoryMinMB int
+	// InventoryMaxFiles bounds one walk so a mis-pointed root cannot stream a
+	// million rows. Hitting it leaves the generation OPEN — nothing is pruned
+	// on the basis of a walk that did not finish.
+	InventoryMaxFiles int
+
 	// Layered holds the yml/env/web tiers for settings that are tunable via
 	// the site or local web UI. The fields above continue to be populated
 	// from the *effective* tier at construction time so legacy readers see
@@ -214,6 +239,12 @@ func newConfigFromLayered(l *Layered) *Config {
 		OfferRemoteFulfill:     getEnv("OFFER_REMOTE_FULFILL", "false") == "true",
 		OfferRemoteMaxGB:       getEnvAsInt("OFFER_REMOTE_MAX_GB", 25),
 		OfferRemoteTimeoutMin:  getEnvAsInt("OFFER_REMOTE_TIMEOUT_MIN", 240),
+
+		InventoryEnabled:     getEnv("INVENTORY_ENABLED", "false") == "true",
+		InventoryRoots:       getEnv("INVENTORY_ROOTS", ""),
+		InventoryIntervalMin: getEnvAsInt("INVENTORY_INTERVAL_MIN", 360),
+		InventoryMinMB:       getEnvAsInt("INVENTORY_MIN_MB", 1),
+		InventoryMaxFiles:    getEnvAsInt("INVENTORY_MAX_FILES", 200000),
 	}
 }
 
