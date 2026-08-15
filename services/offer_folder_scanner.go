@@ -49,6 +49,26 @@ var (
 	// "ep01" inside "Show - ep01.mkv" but also "話01" with CJK adjacent.
 	// Dropping `\b` entirely would let it match inside "episode10" → "e10".
 	reEpOnly = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])[Ee](?:p(?:isode)?)?\s*(\d{1,3})(?:[^A-Za-z0-9]|$)`)
+	// reDashEp is the fansub convention: "[Group] Show Title - 07 (1080p)".
+	// It is the most common anime naming there is and nothing above matched
+	// it, so season and episode both came back zero.
+	//
+	// WHY THAT MATTERED MORE THAN A MISSING FIELD. Season and episode are part
+	// of the offer bucket identity (ComputeOfferHash). With both zero, every
+	// episode of a season hashes to the SAME bucket — so publishing a
+	// twelve-episode season created one offer, and a member requesting it got
+	// whichever episode the offerer happened to resolve. Found 2026-08-15 by
+	// reading what the walker actually emitted rather than what it was meant to.
+	//
+	// Deliberately strict about what follows the number: a bare " - 2024" in
+	// "Some.Movie - 2024" must not read as episode 2024, and a 4-digit run is
+	// refused outright by the {1,3} bound. The trailing group also refuses a
+	// digit so "- 07p" or a split resolution cannot half-match.
+	reDashEp = regexp.MustCompile(`(?:^|\s)-\s*(\d{1,3})(?:v\d)?(?:\s|$|[\(\[])`)
+	// reSeasonOnly catches the season when it is stated separately from the
+	// episode ("S3 - 07", "Season 2"). Anchored on a non-alphanumeric or
+	// string start so "NCIS3" is not season 3.
+	reSeasonOnly = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])S(?:eason)?\s*(\d{1,2})(?:[^A-Za-z0-9]|$)`)
 	// Scene-tag suffix in []brackets at the start (e.g. "[SubsPlease]
 	// Show Title - 03 (1080p) [ABCDEFG].mkv") — drop both leading and
 	// trailing bracket groups so the title alone goes to the resolver.
@@ -166,12 +186,18 @@ func parseScannedFile(path string, size int64) ScannedFile {
 	stem := strings.TrimSuffix(base, filepath.Ext(base))
 	row := ScannedFile{Path: path, SizeBytes: size}
 
+	// Ordered most-specific first. S01E07 states both unambiguously; the
+	// dash and ep-only forms state only the episode, and the season is then
+	// looked for separately before falling back to 1.
 	if m := reSeasonEp.FindStringSubmatch(stem); m != nil {
 		row.Season, _ = strconv.Atoi(m[1])
 		row.Episode, _ = strconv.Atoi(m[2])
 	} else if m := reEpOnly.FindStringSubmatch(stem); m != nil {
-		row.Season = 1
 		row.Episode, _ = strconv.Atoi(m[1])
+		row.Season = seasonFrom(stem)
+	} else if m := reDashEp.FindStringSubmatch(stem); m != nil {
+		row.Episode, _ = strconv.Atoi(m[1])
+		row.Season = seasonFrom(stem)
 	}
 	if m := reResolution.FindStringSubmatch(stem); m != nil {
 		row.Resolution = strings.ToLower(m[1])
@@ -194,6 +220,22 @@ func parseScannedFile(path string, size int64) ScannedFile {
 	clean = strings.Join(strings.Fields(clean), " ")
 	row.RawTitle = clean
 	return row
+}
+
+// seasonFrom reads a standalone season marker ("S3", "Season 2") out of a
+// name whose episode was matched separately.
+//
+// Falls back to 1 rather than 0. A show with no season stated is season one
+// far more often than it is seasonless, and 0 is the value that collapses
+// distinct episodes into one offer bucket — so the safer default is the one
+// that keeps them apart.
+func seasonFrom(stem string) int {
+	if m := reSeasonOnly.FindStringSubmatch(stem); m != nil {
+		if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 1
 }
 
 // SizeBucket maps a byte count to the four allowed buckets the site
