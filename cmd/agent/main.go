@@ -836,6 +836,16 @@ func main() {
 		log.Printf("[inventory] service started (interval=%dm min=%dMB max=%d)",
 			cfg.InventoryIntervalMin, cfg.InventoryMinMB, cfg.InventoryMaxFiles)
 	}
+	// The prober describes what the walker reported. Separate service because
+	// the two run on very different clocks: a library is walked in seconds and
+	// described over days.
+	if probe, err := services.NewInventoryProbeService(cfg, site, services.LoadOfferConfigQuiet(cfg.OfferConfigPath)); err != nil {
+		log.Fatalf("inventory probe config: %v", err)
+	} else if probe != nil {
+		probe.Start(ctx)
+		log.Printf("[inventory] media prober started (interval=%dm batch=%d)",
+			cfg.InventoryProbeIntervalMin, cfg.InventoryProbeBatch)
+	}
 	// Fulfill loop — paired with sync. Polls /api/agent/offer/
 	// requests/pending and walks claim→deliver/fail. Phase 3a stubs
 	// the deliver step; 3b plugs the upload pipeline in.

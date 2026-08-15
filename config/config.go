@@ -156,6 +156,18 @@ type Config struct {
 	// million rows. Hitting it leaves the generation OPEN — nothing is pruned
 	// on the basis of a walk that did not finish.
 	InventoryMaxFiles int
+	// InventoryProbeEnabled runs ffprobe over staged files so an offer gets a
+	// detail page describing bytes nobody uploaded. Metadata only — no
+	// screenshots, which for a whole library run to hundreds of GB and cost a
+	// video decode each. Defaults ON when inventory reporting is on: reporting
+	// a file the site cannot describe is most of the work for half the value.
+	InventoryProbeEnabled bool
+	// InventoryProbeIntervalMin is how often a batch runs, and
+	// InventoryProbeBatch how many files it takes. Deliberately small and
+	// frequent: a library is days of work and an agent that spends every cycle
+	// probing is not doing the job it was installed for.
+	InventoryProbeIntervalMin int
+	InventoryProbeBatch       int
 
 	// Layered holds the yml/env/web tiers for settings that are tunable via
 	// the site or local web UI. The fields above continue to be populated
@@ -245,6 +257,10 @@ func newConfigFromLayered(l *Layered) *Config {
 		InventoryIntervalMin: getEnvAsInt("INVENTORY_INTERVAL_MIN", 360),
 		InventoryMinMB:       getEnvAsInt("INVENTORY_MIN_MB", 1),
 		InventoryMaxFiles:    getEnvAsInt("INVENTORY_MAX_FILES", 200000),
+
+		InventoryProbeEnabled:     getEnv("INVENTORY_PROBE_ENABLED", "true") == "true",
+		InventoryProbeIntervalMin: getEnvAsInt("INVENTORY_PROBE_INTERVAL_MIN", 15),
+		InventoryProbeBatch:       getEnvAsInt("INVENTORY_PROBE_BATCH", 25),
 	}
 }
 

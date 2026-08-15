@@ -40,6 +40,22 @@ const AgentProtocolVersion = 3
 // AgentProtocolVersion's job — but useful for debugging which agents in the
 // field have picked up a release.
 //
+// 1.5.33 — describes what it offers. Runs the same ffprobe the upload
+//	pipeline uses over staged files and reports codecs, duration, audio
+//	tracks and subtitle languages, so an offer gets a detail page as
+//	informative as a release page for bytes nobody uploaded.
+//
+//	Metadata only. Screenshots for a whole library run to hundreds of GB
+//	and cost a video decode each; ffprobe reads headers, so it can cover
+//	everything while screenshots wait for the publish path where the
+//	operator's own decision bounds the count.
+//
+//	The SITE owns the queue -- it is the only side that knows what it
+//	already has, so an agent deciding for itself would re-probe a finished
+//	library on every restart. A file that cannot be probed is reported
+//	with no media rather than skipped, which is what takes it off the
+//	queue instead of retrying it every tick forever.
+//
 // 1.5.32 — inventory progress is visible on the SITE, not just in the
 //	container log. Each walk now posts its summary and every failure case
 //	(no roots, unwalkable path, truncation, refused paths) through
@@ -1121,4 +1137,4 @@ const AgentProtocolVersion = 3
 //	per-file Size + Transferred populated, ProgressCallback
 //	signature carries total/transferred bytes, opt-in cache
 //	hit before DHT.
-const AgentVersion = "1.5.32"
+const AgentVersion = "1.5.33"
