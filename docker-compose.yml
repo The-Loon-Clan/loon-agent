@@ -120,6 +120,35 @@ services:
       # NZBs to land directly on your host filesystem for syncing
       # to another tool / a *arr stack / a backup script.
       - OFFLINE_OUTPUT_DIR=${OFFLINE_OUTPUT_DIR:-/data/offline-output}
+
+      # ── Offer system ────────────────────────────────────────────────
+      # These were read by the agent but NEVER forwarded here, so setting
+      # them in .env did nothing at all: compose interpolates .env into
+      # THIS file, and a variable that is not named here never reaches the
+      # container. OFFER_ENABLED in particular meant the offer feature was
+      # unreachable through the standard deployment. Found 2026-08-15.
+      - OFFER_ENABLED=${OFFER_ENABLED:-false}
+      - OFFER_CONFIG=${OFFER_CONFIG:-}
+      - OFFER_SYNC_INTERVAL_MIN=${OFFER_SYNC_INTERVAL_MIN:-60}
+      - OFFER_REMOTE_FULFILL=${OFFER_REMOTE_FULFILL:-false}
+      - OFFER_REMOTE_MAX_GB=${OFFER_REMOTE_MAX_GB:-25}
+      - OFFER_REMOTE_TIMEOUT_MIN=${OFFER_REMOTE_TIMEOUT_MIN:-240}
+
+      # ── Inventory reporting ─────────────────────────────────────────
+      # Reports the library tree to the site so you can pick what to offer.
+      # INVENTORY_ROOTS is a path INSIDE this container — mount your library
+      # under `volumes:` below and use the SAME path on both sides so there
+      # is only one path to think about.
+      - INVENTORY_ENABLED=${INVENTORY_ENABLED:-false}
+      - INVENTORY_ROOTS=${INVENTORY_ROOTS:-}
+      - INVENTORY_INTERVAL_MIN=${INVENTORY_INTERVAL_MIN:-360}
+      - INVENTORY_MIN_MB=${INVENTORY_MIN_MB:-1}
+      - INVENTORY_MAX_FILES=${INVENTORY_MAX_FILES:-200000}
+
+      # Read by the agent for the offer config path and NZB metadata.
+      - CONFIG_DIR=${CONFIG_DIR:-/data}
+      - SITE_NAME=${SITE_NAME:-}
+      - OBFUSCATE=${OBFUSCATE:-false}
     volumes:
       # Everything the pipeline touches — downloads, staging, par2, offline
       # output — lives under /data. The default named volume puts that on
