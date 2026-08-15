@@ -16,6 +16,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -77,7 +78,7 @@ func (s *InventoryService) Start(ctx context.Context) {
 			return
 		}
 		if len(s.roots) == 0 {
-			log.Printf("[inventory] enabled but no roots configured — set INVENTORY_ROOTS " +
+			s.report("error", "enabled but no roots configured — set INVENTORY_ROOTS "+
 				"or declare a folder source in offer.json")
 			return
 		}
@@ -96,13 +97,36 @@ func (s *InventoryService) Start(ctx context.Context) {
 	}()
 }
 
+// report writes one line to the container log AND to the site's agent_logs,
+// which is what the agent dashboard renders.
+//
+// Both, deliberately. The container log is the only place with the full story
+// when something is badly wrong (a panic, a config the agent never parsed), but
+// it requires shell access to the box the agent runs on. The whole point of
+// this feature is that the operator drives it from the SITE, so "did a walk
+// happen, what did it find" has to be visible there too. Shipping it only to
+// stdout is what made the first hour of running this feature guesswork.
+//
+// Site delivery is best-effort: a log line that fails to post must never fail
+// the walk that produced it.
+func (s *InventoryService) report(level, format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	log.Printf("[inventory] %s", msg)
+	if s.site != nil {
+		_ = s.site.PostLog(level, "[inventory] "+msg)
+	}
+}
+
 func (s *InventoryService) runOnce(ctx context.Context) {
 	for _, root := range s.roots {
 		if ctx.Err() != nil {
 			return
 		}
 		if err := s.reportRoot(ctx, root); err != nil {
-			log.Printf("[inventory] %s: %v", root, err)
+			// error, not info: a root that cannot be walked is the single most
+			// common way this feature silently does nothing, and the message
+			// names the path so a container-vs-host mount mistake is obvious.
+			s.report("error", "%s: %v", root, err)
 		}
 	}
 }
@@ -123,7 +147,8 @@ func (s *InventoryService) reportRoot(ctx context.Context, root string) error {
 		// Deliberately not a final=true empty generation. "I found nothing"
 		// and "the mount is not there" look identical from here, and only one
 		// of them should wipe the operator's inventory.
-		log.Printf("[inventory] %s: no files matched (skipped %d) — not closing the generation",
+		s.report("warn", "%s: no files matched (skipped %d) — not closing the generation. "+
+			"If the library is not empty, check the path exists INSIDE the container.",
 			root, res.Skipped)
 		return nil
 	}
@@ -162,7 +187,7 @@ func (s *InventoryService) reportRoot(ctx context.Context, root string) error {
 		resolved += resp.ResolvedAnime
 		refused += resp.SkippedInvalid + resp.SkippedPath
 		if final {
-			log.Printf("[inventory] %s: %d files (%.1f GB) in %d batch(es) — %d accepted, "+
+			s.report("info", "%s: %d files (%.1f GB) in %d batch(es) — %d accepted, "+
 				"%d matched anime, %d pruned, %d now missing [%s]",
 				root, len(res.Files), float64(res.TotalBytes())/1e9, len(batches),
 				accepted, resolved, resp.Pruned, resp.MarkedMissing, time.Since(started).Round(time.Second))
@@ -170,15 +195,15 @@ func (s *InventoryService) reportRoot(ctx context.Context, root string) error {
 	}
 
 	if res.Truncated {
-		log.Printf("[inventory] %s: TRUNCATED at %d files — generation left open, nothing pruned. "+
+		s.report("warn", "%s: TRUNCATED at %d files — generation left open, nothing pruned. "+
 			"Raise INVENTORY_MAX_FILES or narrow the root.", root, s.cfg.InventoryMaxFiles)
 	}
 	if refused > 0 {
-		log.Printf("[inventory] %s: the site refused %d path(s) as unusable (invalid UTF-8, or not "+
+		s.report("warn", "%s: the site refused %d path(s) as unusable (invalid UTF-8, or not "+
 			"relative) — those files will not appear in the tree", root, refused)
 	}
 	if res.Skipped > 0 {
-		log.Printf("[inventory] %s: %d entr(ies) unreadable during the walk", root, res.Skipped)
+		s.report("warn", "%s: %d entr(ies) unreadable during the walk", root, res.Skipped)
 	}
 	return nil
 }

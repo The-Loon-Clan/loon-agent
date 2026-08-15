@@ -40,6 +40,14 @@ const AgentProtocolVersion = 3
 // AgentProtocolVersion's job — but useful for debugging which agents in the
 // field have picked up a release.
 //
+// 1.5.32 — inventory progress is visible on the SITE, not just in the
+//	container log. Each walk now posts its summary and every failure case
+//	(no roots, unwalkable path, truncation, refused paths) through
+//	PostLog, so the agent dashboard answers "did a walk happen and what
+//	did it find". Shipping it to stdout alone meant diagnosing the
+//	feature required shell access to the agent's box, which defeats the
+//	point of driving it from the site.
+//
 // 1.5.31 — inventory reporting, and an episode-parsing fix that mattered
 //	more than it looked.
 //
@@ -1113,4 +1121,4 @@ const AgentProtocolVersion = 3
 //	per-file Size + Transferred populated, ProgressCallback
 //	signature carries total/transferred bytes, opt-in cache
 //	hit before DHT.
-const AgentVersion = "1.5.31"
+const AgentVersion = "1.5.32"
