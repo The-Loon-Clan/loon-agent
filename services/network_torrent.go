@@ -15,12 +15,23 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/anacrolix/torrent"
 	"golang.org/x/net/proxy"
 	"golang.org/x/time/rate"
 )
+
+// activeSeedCount is how many seed phases are running right now. Published in
+// the live status because each one holds a disk reservation for a task the
+// queue no longer shows.
+var activeSeedCount int64
+
+// ActiveSeedCount reports the number of torrents currently seeding back.
+func ActiveSeedCount() int {
+	return int(atomic.LoadInt64(&activeSeedCount))
+}
 
 // ErrInsufficientDisk is returned by the pre-flight capacity check when a
 // specific torrent won't fit on this agent. Callers use errors.Is to detect
@@ -473,6 +484,11 @@ func runSeedPhase(ctx context.Context, t *torrent.Torrent, jobName string, so se
 	if total <= 0 {
 		return
 	}
+	// Counted for the whole phase: seeding holds the job's disk reservation
+	// after the task leaves the visible queue, and the status reporter
+	// publishes this so "Reserved N GB, nothing running" self-explains.
+	atomic.AddInt64(&activeSeedCount, 1)
+	defer atomic.AddInt64(&activeSeedCount, -1)
 	// Always bound the seed phase in time. When the operator set a ratio
 	// target but left torrent_seed_hours=0, fall back to defaultMaxSeedHours
 	// — otherwise a torrent that never reaches its ratio seeds FOREVER.

@@ -1064,6 +1064,7 @@ func (u *LocalUI) handleEvents(w http.ResponseWriter, r *http.Request) {
 			"disk_free_gb":     snap.DiskFreeGB,
 			"disk_reserved_gb": snap.DiskReservedGB,
 			"disk_total_gb":    snap.DiskTotalGB,
+			"seeding_count":    snap.SeedingCount,
 		}
 		if u.db != nil {
 			// Job counts per status — drive sidebar badges and also catches

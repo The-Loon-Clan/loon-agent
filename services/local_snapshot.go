@@ -27,6 +27,7 @@ type LiveSnapshot struct {
 	DiskFreeGB     float64   `json:"disk_free_gb"`
 	DiskReservedGB float64   `json:"disk_reserved_gb"`
 	DiskTotalGB    float64   `json:"disk_total_gb"` // 0 on stub platforms; sidebar hides the bar when 0
+	SeedingCount   int       `json:"seeding_count"` // tasks still in their seed-back phase, holding reservations
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 

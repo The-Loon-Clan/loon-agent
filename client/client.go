@@ -618,6 +618,11 @@ type AgentLiveStatus struct {
 	RequestID       int64          `json:"request_id,omitempty"`
 	DiskFreeGB      float64        `json:"disk_free_gb,omitempty"`
 	DiskReservedGB  float64        `json:"disk_reserved_gb,omitempty"`
+	// SeedingCount is how many completed tasks are still seeding back. Those
+	// phases hold disk reservations for up to an hour after the task leaves
+	// the visible queue, so without this number the dashboard shows
+	// "Reserved N GB" against an empty queue and it reads as a leak.
+	SeedingCount int `json:"seeding_count,omitempty"`
 }
 
 // FileProgress tracks per-file download/upload progress.

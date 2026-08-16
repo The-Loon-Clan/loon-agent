@@ -460,6 +460,9 @@ func startStatusReporter(site client.Site, tempDir string) {
 			snap.DiskFreeGB = float64(free) / 1024 / 1024 / 1024
 		}
 		snap.DiskReservedGB = float64(services.TotalReservedBytes()) / 1024 / 1024 / 1024
+		// Why disk is reserved when the queue looks empty: seed phases outlive
+		// their task by up to an hour and keep the reservation the whole time.
+		snap.SeedingCount = services.ActiveSeedCount()
 		var diskTotalGB float64
 		if total, err := services.TotalDiskSpace(tempDir); err == nil && total > 0 {
 			diskTotalGB = float64(total) / 1024 / 1024 / 1024
@@ -480,6 +483,7 @@ func startStatusReporter(site client.Site, tempDir string) {
 			DiskFreeGB:     snap.DiskFreeGB,
 			DiskReservedGB: snap.DiskReservedGB,
 			DiskTotalGB:    diskTotalGB,
+			SeedingCount:   snap.SeedingCount,
 		})
 
 		resp, err := site.PostStatus(snap)
@@ -1717,319 +1721,14 @@ func processTask(cfg *config.Config, site client.Site, task *client.AgentTask, r
 		return
 	}
 
-	// ── 2. Extract video metadata ──────────────────────────────────────────
-	log.Printf("[%d] Step 2: Analyzing video metadata...", rid)
-	reportProgress("Analyzing", "Extracting video metadata...")
-	updateTaskProgress(task.RequestID, &client.FileProgress{
-		Name: task.Title, Phase: "processing", Percent: 0,
-	})
-
-	// pipelineStages collects one entry per post-download stage so the
-	// site can render a per-release checklist (migration 227). Each
-	// stage call site below appends its outcome. Keeps the diagnosis
-	// visible without needing docker access on the agent host.
-	pipelineStages := map[string]client.StageRecord{}
-	stageOK := func(name string, count int, note string) {
-		pipelineStages[name] = client.StageRecord{Status: "ok", Count: count, Note: note}
-	}
-	stageEmpty := func(name, note string) {
-		pipelineStages[name] = client.StageRecord{Status: "empty", Note: note}
-	}
-	stageSkipped := func(name, note string) {
-		pipelineStages[name] = client.StageRecord{Status: "skipped", Note: note}
-	}
-	stageFailed := func(name, note string) {
-		// Cap reason length so a multi-line exec.Command error doesn't
-		// bloat the row or hit the storage layer's 4 KiB JSON cap.
-		if len(note) > 200 {
-			note = note[:200]
-		}
-		pipelineStages[name] = client.StageRecord{Status: "failed", Note: note}
-	}
-	summarizeSubtitleLangs := func(tracks []services.SubtitleTrack) string {
-		seen := map[string]struct{}{}
-		var order []string
-		for _, t := range tracks {
-			lang := t.Language
-			if lang == "" {
-				lang = "und"
-			}
-			if _, ok := seen[lang]; ok {
-				continue
-			}
-			seen[lang] = struct{}{}
-			order = append(order, lang)
-		}
-		if len(order) <= 6 {
-			return strings.Join(order, ",")
-		}
-		return strings.Join(order[:6], ",") + ",…"
-	}
-	summarizeAudioLangs := func(tracks []services.AudioCatalogTrack) string {
-		seen := map[string]struct{}{}
-		var order []string
-		for _, t := range tracks {
-			lang := t.Language
-			if lang == "" {
-				lang = "und"
-			}
-			if _, ok := seen[lang]; ok {
-				continue
-			}
-			seen[lang] = struct{}{}
-			order = append(order, lang)
-		}
-		if len(order) <= 6 {
-			return strings.Join(order, ",")
-		}
-		return strings.Join(order[:6], ",") + ",…"
-	}
-
-	var videoInfo *services.VideoInfo
-	var screenshots []string
-	// isManga is set on the CBZ/EPUB branch below so the OCR step
-	// (Step 3f) knows to run tesseract — anime screenshots aren't
-	// worth OCRing.
-	var isManga bool
-	videoFiles := services.FindVideoFiles(downloadedPath)
-
-	if len(videoFiles) > 0 {
-		mainVideo := videoFiles[0] // largest video file
-
-		info, err := services.ProbeVideo(ctx, mainVideo)
-		if err != nil {
-			log.Printf("[%d] Probe warning (non-fatal): %v", rid, err)
-			stageFailed("mediainfo", err.Error())
-		} else {
-			videoInfo = info
-			log.Printf("[%d] Video: %s %dx%d %s %s %s",
-				rid, info.VideoCodec, info.Width, info.Height,
-				info.ResolutionLabel(), info.HDR, info.DurationStr())
-			stageOK("mediainfo", 1, fmt.Sprintf("%s %s %s", info.VideoCodec, info.ResolutionLabel(), info.HDR))
-		}
-
-		// ── 3. Generate screenshots ────────────────────────────────────────
-		if videoInfo != nil && videoInfo.Duration > 10 {
-			log.Printf("[%d] Step 3: Generating screenshots...", rid)
-			reportProgress("Screenshots", "Capturing preview images...")
-			updateTaskProgress(task.RequestID, &client.FileProgress{
-				Name: task.Title, Phase: "screenshots",
-			})
-			// 1.5.22: screen dir moved inside dataDir as a sibling of
-			// _subtitles. Previously a top-level <tempDir>/screens-XXX
-			// dir, which was NOT in the disk_reserve_sweep keep-set
-			// (only dl-XXX and stage-XXX were). The sweep's 30-min
-			// minAge was the only protection; a slow upload past that
-			// window and the screenshot dir got nuked mid-use,
-			// producing the same metadata-without-files symptom as the
-			// 1.5.20 dl-XXX race. Inside dataDir, the dl-XXX keep-set
-			// protection covers it automatically.
-			screenDir := filepath.Join(downloadedPath, "_screenshots")
-			defer os.RemoveAll(screenDir)
-
-			shots, err := services.GenerateScreenshots(ctx, mainVideo, screenDir, videoInfo.Duration, 6)
-			if err != nil {
-				log.Printf("[%d] Screenshot warning (non-fatal): %v", rid, err)
-				stageFailed("screenshots", err.Error())
-			} else if len(shots) > 0 {
-				screenshots = shots
-				log.Printf("[%d] Generated %d screenshots", rid, len(shots))
-				stageOK("screenshots", len(shots), "")
-			} else {
-				stageEmpty("screenshots", "ffmpeg returned no frames")
-			}
-		} else if videoInfo != nil {
-			stageSkipped("screenshots", fmt.Sprintf("video too short (%s)", videoInfo.DurationStr()))
-		}
-	} else if archive := services.FindMangaArchive(downloadedPath); archive != "" {
-		// Manga path: no video file, but there's a CBZ/EPUB. Extract 6
-		// sample pages using the same screenshot upload pipeline — the
-		// site stores/renders them identically to video stills.
-		isManga = true
-		log.Printf("[%d] Step 2: Found manga archive: %s", rid, filepath.Base(archive))
-		stageSkipped("mediainfo", "manga archive (no video file)")
-		reportProgress("Screenshots", "Extracting preview pages...")
-		updateTaskProgress(task.RequestID, &client.FileProgress{
-			Name: task.Title, Phase: "screenshots",
-		})
-		// 1.5.22: see comment on the video path above — screen dir now
-		// inside dataDir so the dl-XXX keep-set protects it from the
-		// disk_reserve_sweep.
-		screenDir := filepath.Join(downloadedPath, "_screenshots")
-		defer os.RemoveAll(screenDir)
-
-		shots, err := services.GenerateMangaScreenshots(ctx, archive, screenDir, 6)
-		if err != nil {
-			log.Printf("[%d] Manga screenshot warning (non-fatal): %v", rid, err)
-			stageFailed("screenshots", err.Error())
-		} else if len(shots) > 0 {
-			screenshots = shots
-			log.Printf("[%d] Extracted %d manga pages", rid, len(shots))
-			stageOK("screenshots", len(shots), "manga pages")
-		} else {
-			stageEmpty("screenshots", "manga archive yielded no extractable pages")
-		}
-	} else {
-		stageSkipped("mediainfo", "no video file or manga archive found")
-		stageSkipped("screenshots", "no video file or manga archive found")
-	}
-
-	// ── 4. Prepare upload directory with obfuscated filenames ───────────────
-	// "stage-" prefix gives SweepOrphanDownloads a recognizable shape so
-	// stage dirs left behind by a force-killed agent get cleaned up like
-	// dl-* and screens-* do. defer handles the happy path.
-	//
-	// SetJobStagePath publishes this dir to the orphan-sweep keep-set: a
-	// task that sits queued behind a slow upload can wait long enough that
-	// the 30-min stale-dir sweep would otherwise wipe its stage and the
-	// upload would "complete" with zero articles posted. We clear it back
-	// to "" in the defer alongside RemoveAll.
-	stageDir := filepath.Join(cfg.TempDir, "stage-"+services.GenerateRandomPassword(12))
-	if err := os.MkdirAll(stageDir, 0755); err != nil {
-		fail("Prepare", "Stage dir error", err)
-		return
-	}
-	storage.SetJobStagePath(jobName, stageDir)
-	defer func() {
-		os.RemoveAll(stageDir)
-		storage.SetJobStagePath(jobName, "")
-	}()
-
-	// ── 3b. Extract subtitle tracks ────────────────────────────────────────
-	// Run before staging so the extraction directory shares the same
-	// download root (gets cleaned up by the same os.RemoveAll defer).
-	// Failure here is non-fatal: the upload + screenshot pipeline runs
-	// regardless. Empty result for releases with no subtitle tracks.
-	subtitleDir := filepath.Join(downloadedPath, "_subtitles")
-	subStatus := services.SubtitleToolStatus()
-	subtitleTracks, subErr := services.ExtractSubtitles(ctx, downloadedPath, subtitleDir)
-	switch {
-	case subStatus != "":
-		// Pre-flight told us why the stage will silently return nil —
-		// surface that in the checklist instead of an unattributed "empty".
-		stageSkipped("subtitles", subStatus)
-	case subErr != nil:
-		log.Printf("[%d] subtitles: extraction failed (continuing): %v", rid, subErr)
-		stageFailed("subtitles", subErr.Error())
-	case len(subtitleTracks) > 0:
-		log.Printf("[%d] subtitles: extracted %d track(s)", rid, len(subtitleTracks))
-		stageOK("subtitles", len(subtitleTracks), summarizeSubtitleLangs(subtitleTracks))
-	default:
-		stageEmpty("subtitles", "no subtitle tracks found in MKV containers")
-	}
-	// Convert the agent-side tracks into the client-side upload
-	// payload. The NzbID stays zero — Complete fills it in from
-	// the site response.
-	var subtitleUploads []client.SubtitleUpload
-	for _, t := range subtitleTracks {
-		subtitleUploads = append(subtitleUploads, client.SubtitleUpload{
-			TrackIndex:   t.TrackIndex,
-			Language:     t.Language,
-			TrackName:    t.TrackName,
-			Codec:        t.Codec,
-			Forced:       t.Forced,
-			DefaultTrack: t.DefaultTrack,
-			Path:         t.File,
-		})
-	}
-
-	// ── 3c. Probe audio tracks ─────────────────────────────────────────────
-	// Metadata-only catalog (see migration 217). No files to extract,
-	// no disk usage, just mkvmerge -J per video. Same forward-compat
-	// rule as subtitles: missing mkvmerge ⇒ skip silently.
-	audioTracks, audioErr := services.ProbeAudioTracks(ctx, downloadedPath)
-	switch {
-	case audioErr != nil:
-		log.Printf("[%d] audio: probe failed (continuing): %v", rid, audioErr)
-		stageFailed("audio_tracks", audioErr.Error())
-	case len(audioTracks) > 0:
-		log.Printf("[%d] audio: cataloged %d track(s)", rid, len(audioTracks))
-		stageOK("audio_tracks", len(audioTracks), summarizeAudioLangs(audioTracks))
-	default:
-		// Could be: mkvmerge missing, no video files, or videos without
-		// audio streams. We don't reach in to distinguish today — the
-		// site-side aggregate stat ("X% of completed releases have an
-		// audio_tracks=empty entry") makes the macro problem visible.
-		stageEmpty("audio_tracks", "no audio tracks cataloged")
-	}
-	var audioUploads []client.AudioTrackUpload
-	for _, t := range audioTracks {
-		audioUploads = append(audioUploads, client.AudioTrackUpload{
-			TrackIndex:   t.TrackIndex,
-			Language:     t.Language,
-			TrackName:    t.TrackName,
-			Codec:        t.Codec,
-			Channels:     t.Channels,
-			SampleRateHz: t.SampleRateHz,
-			BitrateKbps:  t.BitrateKbps,
-			DefaultTrack: t.DefaultTrack,
-			Forced:       t.Forced,
-		})
-	}
-
-	// ── 3d. Acoustic fingerprint (Chromaprint via fpcalc) ──────────────────
-	// One row per video file. Used by the site to detect duplicate
-	// audio across releases (same Japanese dub, different rips). No
-	// files to extract — just a base32 string per video.
-	fingerprints, fpErr := services.FingerprintAudio(ctx, downloadedPath)
-	switch {
-	case fpErr != nil:
-		log.Printf("[%d] fingerprint: failed (continuing): %v", rid, fpErr)
-		stageFailed("audio_fingerprints", fpErr.Error())
-	case len(fingerprints) > 0:
-		log.Printf("[%d] fingerprint: generated for %d file(s)", rid, len(fingerprints))
-		stageOK("audio_fingerprints", len(fingerprints), "")
-	default:
-		stageEmpty("audio_fingerprints", "fpcalc produced no fingerprints (missing binary or no audio)")
-	}
-	var fingerprintUploads []client.AudioFingerprintUpload
-	for _, f := range fingerprints {
-		fingerprintUploads = append(fingerprintUploads, client.AudioFingerprintUpload{
-			SourceFilename:   f.SourceFilename,
-			DurationSeconds:  f.DurationSeconds,
-			AlgorithmVersion: f.AlgorithmVersion,
-			Fingerprint:      f.Fingerprint,
-		})
-	}
-
-	// ── 3e. Dominant color palette ─────────────────────────────────────────
-	// Bucket-histograms the screenshots we already generated. Pure
-	// in-process work, no external binaries, ~50ms for 8 screenshots.
-	// Empty for releases without screenshots (manga only / failed
-	// screenshot pass) — the site hides the swatch strip in that case.
-	dominantPalette := services.ExtractDominantPalette(screenshots, 8)
-	switch {
-	case len(screenshots) == 0:
-		stageSkipped("dominant_palette", "no screenshots to sample")
-	case len(dominantPalette) > 0:
-		log.Printf("[%d] palette: %d colours from %d screenshot(s)", rid, len(dominantPalette), len(screenshots))
-		stageOK("dominant_palette", len(dominantPalette), "")
-	default:
-		stageEmpty("dominant_palette", "bucket-histogram returned no colours")
-	}
-
-	// ── 3f. Manga OCR ──────────────────────────────────────────────────────
-	// Only runs on the manga branch — anime screenshots aren't worth
-	// OCRing (subtitles + scene cuts produce noise, not useful text).
-	// Tesseract is optional; missing binary or missing language data
-	// logs once and skips.
-	var ocrResult services.OCRResult
-	switch {
-	case !isManga:
-		stageSkipped("ocr", "anime release (OCR runs only on manga)")
-	case len(screenshots) == 0:
-		stageSkipped("ocr", "no manga pages available to OCR")
-	default:
-		ocrResult = services.OCRMangaPages(ctx, screenshots, "eng+jpn")
-		switch {
-		case ocrResult.Text != "":
-			log.Printf("[%d] ocr: extracted %d chars from %d page(s) (%s)", rid, len(ocrResult.Text), len(screenshots), ocrResult.Language)
-			stageOK("ocr", len(ocrResult.Text), ocrResult.Language)
-		default:
-			stageEmpty("ocr", "tesseract produced no recognisable text")
-		}
-	}
-
+	// ── 2–8. The shared publish pipeline ───────────────────────────────────────────
+	// Metadata, staging, archive extraction, PAR2, encryption, the upload
+	// slot, the manifest audit, the NNTP upload and the NZB build all live in
+	// services.PublishDirectory now, because the offer fulfiller publishes
+	// releases too and every stage it lacked was a separate incident. Only
+	// the parts that need the torrent SESSION stay here: the pre-stage
+	// checks below compare the download against the torrent's own metainfo,
+	// which no other caller has.
 	log.Printf("[%d] Step 4: Staging files...", rid)
 	// Pre-stage size-parity check (1.5.25). Before the staging walk
 	// runs, compare what's ACTUALLY on disk in downloadedPath against
@@ -2136,361 +1835,34 @@ func processTask(cfg *config.Config, site client.Site, task *client.AgentTask, r
 			}
 		}
 	}
-	if cfg.Obfuscate {
-		reportProgress("Preparing", "Obfuscating filenames...")
-		if err := services.ObfuscateFiles(ctx, downloadedPath, stageDir); err != nil {
-			fail("Prepare", "Prepare error", err)
-			return
-		}
-	} else {
-		reportProgress("Preparing", "Copying files...")
-		if err := services.CopyFiles(ctx, downloadedPath, stageDir); err != nil {
-			fail("Prepare", "Prepare error", err)
-			return
-		}
-	}
-	log.Printf("[%d] Step 4: Staging complete", rid)
-
-	// ── 4.5. Extract RAR archives ──────────────────────────────────────────
-	// If the staged content contains RAR archives (common shape for
-	// torrent → Usenet republishes and for some offer-shared
-	// folders), unpack them in place. The PAR2 step that follows
-	// generates recovery data for the *extracted* media files, and
-	// the upload step posts the real content instead of a RAR
-	// wrapper. Original .rar volumes + their .par2 recovery files
-	// are deleted after a successful extract so they don't double-
-	// upload. Partial-success errors are logged but don't abort
-	// the task — anything that did extract is kept.
-	log.Printf("[%d] Step 4.5: Scanning for RAR archives...", rid)
-	if extracted, err := services.ExtractRARArchives(ctx, stageDir, func(msg string) {
-		reportProgress("Extract", msg)
-	}); err != nil {
-		log.Printf("[%d] Step 4.5: extract warning (extracted=%d): %v", rid, extracted, err)
-	} else if extracted > 0 {
-		log.Printf("[%d] Step 4.5: Extracted %d RAR archive(s)", rid, extracted)
-	} else {
-		log.Printf("[%d] Step 4.5: No RAR archives found", rid)
-	}
-
-	// ── 4.6. Extract compressed ZIP archives ───────────────────────────────
-	// Same rationale as RAR, with a store-mode exception: a zip whose
-	// entries are all stored (no compression) is already streamable in
-	// place, so we leave it; a zip with any compressed entry locks the
-	// media behind Deflate, so we unpack it before PAR2 + upload. Runs
-	// after RAR so a RAR-inside-zip (rare) still gets the RAR pass on a
-	// later task if needed. Native archive/zip — no external binary.
-	log.Printf("[%d] Step 4.6: Scanning for ZIP archives...", rid)
-	if extracted, err := services.ExtractZIPArchives(ctx, stageDir, func(msg string) {
-		reportProgress("Extract", msg)
-	}); err != nil {
-		log.Printf("[%d] Step 4.6: extract warning (extracted=%d): %v", rid, extracted, err)
-	} else if extracted > 0 {
-		log.Printf("[%d] Step 4.6: Extracted %d ZIP archive(s)", rid, extracted)
-	} else {
-		log.Printf("[%d] Step 4.6: No compressed ZIP archives found", rid)
-	}
-
-	// ── 4.7. Extract 7z archives ────────────────────────────────────────────
-	// Same rationale as RAR (always compressed, no store-mode exception):
-	// 7z locks media behind LZMA, so we always unpack single + split
-	// (.7z / .7z.001) sets before PAR2 + upload. Shells to the same
-	// 7z/7za/7zr family the RAR fallback already requires.
-	log.Printf("[%d] Step 4.7: Scanning for 7z archives...", rid)
-	if extracted, err := services.Extract7zArchives(ctx, stageDir, func(msg string) {
-		reportProgress("Extract", msg)
-	}); err != nil {
-		log.Printf("[%d] Step 4.7: extract warning (extracted=%d): %v", rid, extracted, err)
-	} else if extracted > 0 {
-		log.Printf("[%d] Step 4.7: Extracted %d 7z archive(s)", rid, extracted)
-	} else {
-		log.Printf("[%d] Step 4.7: No 7z archives found", rid)
-	}
-
-	// ── 4.8. Extract ISO disc images ────────────────────────────────────────
-	// p7zip reads ISO9660 + UDF, so a data ISO or a BD/DVD disc image
-	// is unpacked into its real file tree (BDMV / VIDEO_TS / files)
-	// before PAR2 + upload. Reuses the same 7z binary as Step 4.7 — no
-	// extra dependency, silent no-op when 7z is absent.
-	log.Printf("[%d] Step 4.8: Scanning for ISO disc images...", rid)
-	if extracted, err := services.ExtractISOArchives(ctx, stageDir, func(msg string) {
-		reportProgress("Extract", msg)
-	}); err != nil {
-		log.Printf("[%d] Step 4.8: extract warning (extracted=%d): %v", rid, extracted, err)
-	} else if extracted > 0 {
-		log.Printf("[%d] Step 4.8: Extracted %d ISO image(s)", rid, extracted)
-	} else {
-		log.Printf("[%d] Step 4.8: No ISO disc images found", rid)
-	}
-
-	// ── 4.9. Extract tarballs ───────────────────────────────────────────────
-	// Linux-origin releases occasionally ship media inside a (compressed)
-	// tarball. gzip/bzip2/plain decode in pure Go; xz/zstd lean on the 7z
-	// binary. Unpacks before PAR2 so the NZB carries the real files.
-	log.Printf("[%d] Step 4.9: Scanning for tar archives...", rid)
-	if extracted, err := services.ExtractTarArchives(ctx, stageDir, func(msg string) {
-		reportProgress("Extract", msg)
-	}); err != nil {
-		log.Printf("[%d] Step 4.9: extract warning (extracted=%d): %v", rid, extracted, err)
-	} else if extracted > 0 {
-		log.Printf("[%d] Step 4.9: Extracted %d tar archive(s)", rid, extracted)
-	} else {
-		log.Printf("[%d] Step 4.9: No tar archives found", rid)
-	}
-
-	// ── 4.10. Extract legacy/odd formats (lzh, cab, arj, cpio) ──────────────
-	// Rare for anime media, but cheap to cover via the 7z binary already
-	// required for Steps 4.7/4.8. Silent no-op when 7z is absent.
-	log.Printf("[%d] Step 4.10: Scanning for lzh/cab/arj/cpio archives...", rid)
-	if extracted, err := services.ExtractMiscArchives(ctx, stageDir, func(msg string) {
-		reportProgress("Extract", msg)
-	}); err != nil {
-		log.Printf("[%d] Step 4.10: extract warning (extracted=%d): %v", rid, extracted, err)
-	} else if extracted > 0 {
-		log.Printf("[%d] Step 4.10: Extracted %d legacy archive(s)", rid, extracted)
-	} else {
-		log.Printf("[%d] Step 4.10: No legacy archives found", rid)
-	}
-
-	// ── 5. Generate PAR2 recovery files ────────────────────────────────────
-	log.Printf("[%d] Step 5: Generating PAR2 recovery data...", rid)
-	reportProgress("PAR2", "Generating recovery data...")
-	updateTaskProgress(task.RequestID, &client.FileProgress{
-		Name: task.Title, Phase: "par2",
-	})
-	baseName := services.GenerateRandomPassword(12)
-	if !cfg.Obfuscate {
-		baseName = services.SanitizeBaseName(task.Title)
-	}
-	par2Start := time.Now()
-
-	// Stream PAR2 progress to the dashboard so users can see it's not stuck.
-	// par2create emits lines like "Processing: 12.3%" and "Creating recovery
-	// file(s): 45.6%" that we parse and forward via the live status channel.
-	par2Progress := func(phase string, pct float64) {
-		elapsed := time.Since(par2Start).Round(time.Second)
-		detail := fmt.Sprintf("%s %.0f%% (%s elapsed)", phase, pct, elapsed)
-		reportProgress("PAR2", detail)
-		updateTaskProgress(task.RequestID, &client.FileProgress{
-			Name:    task.Title,
-			Phase:   "par2",
-			Percent: pct,
-		})
-	}
-
-	par2Files, err := services.GeneratePAR2(ctx, stageDir, baseName, services.PAR2Options{
-		Redundancy: cfg.PAR2Redundancy,
-		BlockSize:  services.ChunkSize,
-		Threads:    cfg.PAR2Threads,
-		MemoryMB:   cfg.PAR2Memory,
-	}, par2Progress)
-	if err != nil {
-		// PAR2 failure visibility (1.5.26).
-		//
-		// Three places it shows up:
-		//   1. Agent log: full context (baseName + stageDir + err)
-		//      so docker logs grep tells the operator everything.
-		//   2. /admin/errors: site.PostLog ships an 'error' entry
-		//      tagged with request_id so admin can spot a flapping
-		//      par2 binary without ssh'ing into the agent.
-		//   3. Release page pipeline checklist: stageEmpty (NOT
-		//      stageFailed) per operator's policy — the release
-		//      shows "par2: empty" on the migration 227 checklist
-		//      but doesn't surface the gory error there; that lives
-		//      in /admin/errors.
-		//
-		// stageEmpty (not stageFailed) is deliberate: from the
-		// end-user's POV, the release simply has no recovery; it's
-		// not "broken". The site renders empty stages as neutral
-		// rather than red. Operator triage goes through /admin/errors.
-		log.Printf("[%d] PAR2 FAILED (non-fatal) for %q in %q: %v",
-			rid, baseName, stageDir, err)
-		site.PostLog("error", fmt.Sprintf(
-			"PAR2 generation failed for request=%d (%s): %v — release shipped to Usenet without recovery files (parity loss is now unrecoverable)",
-			rid, task.Title, err))
-		reportProgress("PAR2", "PAR2 failed, uploading without recovery — admin/errors has details")
-		stageEmpty("par2", "no recovery files generated (see /admin/errors for the underlying binary error)")
-	} else {
-		log.Printf("[%d] Step 5: PAR2 complete in %s — %d recovery file(s) generated",
-			rid, time.Since(par2Start).Round(time.Second), len(par2Files))
-		if len(par2Files) == 0 {
-			// Defensive: GeneratePAR2 returned nil error but zero
-			// files. The walker may have looked at the wrong dir,
-			// or the binary completed without writing output. Ship
-			// the warning so it doesn't go silent.
-			site.PostLog("warn", fmt.Sprintf(
-				"PAR2 reported success but produced ZERO .par2 files for request=%d (%s). Stage dir: %s. Upload continuing without recovery — investigate the par2 binary.",
-				rid, task.Title, stageDir))
-			reportProgress("PAR2", "PAR2 produced no files — uploading without recovery")
-			stageEmpty("par2", "binary returned success but no files were produced (see /admin/errors)")
-		} else {
-			// Successful PAR2 run: record the count + total recovery
-			// MB so the release page checklist can show "par2: 13
-			// files / 1.3 GB" instead of just a green checkmark.
-			var par2Size int64
-			for _, p := range par2Files {
-				if info, statErr := os.Stat(p); statErr == nil {
-					par2Size += info.Size()
-				}
-			}
-			stageOK("par2", len(par2Files),
-				fmt.Sprintf("%.1f MB recovery at %d%%",
-					float64(par2Size)/(1024*1024), cfg.PAR2Redundancy))
-		}
-	}
-
-	// ── 6. Optional encryption ─────────────────────────────────────────────
-	var password string
-	uploadDir := stageDir
-	if cfg.Encrypt {
-		password = services.GenerateRandomPassword(16)
-		archiveName := services.GenerateRandomPassword(16) + ".7z"
-		archivePath := filepath.Join(cfg.TempDir, archiveName)
-		defer os.Remove(archivePath)
-
-		log.Printf("[%d] Step 6: Encrypting with 7z...", rid)
-		reportProgress("Encrypting", "Creating password-protected 7z archive...")
-		updateTaskProgress(task.RequestID, &client.FileProgress{
-			Name: task.Title, Phase: "encrypting",
-		})
-		if err := services.EncryptWith7z(ctx, stageDir, archivePath, password); err != nil {
-			fail("Encrypt", "Encryption error", err)
-			return
-		}
-
-		encDir := filepath.Join(cfg.TempDir, "enc-"+services.GenerateRandomPassword(8))
-		os.MkdirAll(encDir, 0755)
-		defer os.RemoveAll(encDir)
-		os.Rename(archivePath, filepath.Join(encDir, archiveName))
-		uploadDir = encDir
-		log.Printf("Encrypted to %s (%d chars password)", archiveName, len(password))
-	}
-
-	// ── 7. Upload all files to Usenet (serialized — one upload at a time) ──
-	var totalUploadSize int64
-	filepath.Walk(uploadDir, func(_ string, info os.FileInfo, _ error) error {
-		if info != nil && !info.IsDir() {
-			totalUploadSize += info.Size()
-		}
-		return nil
-	})
-
-	log.Printf("[%d] Step 7: Waiting for upload slot (%.1f MiB to upload)...", rid, float64(totalUploadSize)/1024/1024)
-	reportProgress("Queued", "Waiting for upload slot...")
-	updateTaskProgress(task.RequestID, &client.FileProgress{
-		Name: task.Title, Phase: "queued", Size: totalUploadSize,
-	})
-
-	// Wait-time tracking around the slot: if the prior task wedges,
-	// the wait-for-slot duration grows unbounded. Logging the actual
-	// wait makes "30 tasks stacked behind a stuck upload" visible
-	// from the agent log alone — operators don't need the dashboard
-	// to spot the pile-up.
-	//
-	// The slot covers the NNTP upload + site report ONLY. Seeding at
-	// the very end of processTask is BitTorrent traffic, unrelated to
-	// the upload mutex — releasing the slot before session.Seed()
-	// lets the next task start uploading while this one seeds. sync.Once
-	// makes the explicit release idempotent: the deferred path also
-	// fires on error / panic returns that skip the manual release.
-	slotWaitStart := time.Now()
-	services.UploadSlot.Lock()
-	slotHeldSince := time.Now()
-	// Always log slot ownership transitions — pairs with the Released
-	// line so any future slot-held-too-long bug is one grep away.
-	// Format: "[N] Slot ACQUIRED (waited Xs)" → matching
-	// "[N] Slot RELEASED (held Xs)" later. Search the agent log for
-	// gaps where ACQUIRED isn't followed by RELEASED for the same rid
-	// to surface a hung task.
-	if w := time.Since(slotWaitStart); w > 30*time.Second {
-		log.Printf("[%d] Slot ACQUIRED (waited %s)", rid, w.Round(time.Second))
-	} else {
-		log.Printf("[%d] Slot ACQUIRED", rid)
-	}
-	var unlockOnce sync.Once
-	releaseSlot := func() {
-		unlockOnce.Do(func() {
-			services.UploadSlot.Unlock()
-			log.Printf("[%d] Slot RELEASED (held %s)", rid, time.Since(slotHeldSince).Round(time.Second))
-		})
-	}
-	// BELT for the existing SUSPENDERS of defer releaseSlot(): if anything
-	// inside the critical section panics, ensure the slot is released and
-	// then re-panic so the agent crash-restarts cleanly.
-	defer func() {
-		if r := recover(); r != nil {
-			releaseSlot()
-			panic(r)
-		}
-	}()
-	defer releaseSlot()
-
-	// Manifest audit: compare the raw downloaded torrent content against
-	// the directory we're about to publish. Catches the "multi-file
-	// torrent ships as a single-file NZB" symptom BEFORE we burn an
-	// upload on a partial release. See services/upload_manifest.go for
-	// the rule (briefly: refuse to publish when upload has fewer video
-	// files than the source and encryption isn't masking the comparison).
-	//
-	// On failure, route the FULL per-file diff to three places so the
-	// operator can debug without re-running:
-	//   1. docker log — log.Printf the DetailedReport (every missing file)
-	//   2. site agent_logs — site.PostLog the same, visible on the agent
-	//      dashboard in the admin UI
-	//   3. request_lock fail_reason — fail()'s wrap of err.Error() gives
-	//      the concise single-line summary on the request detail page
-	srcManifest := services.ManifestOf(downloadedPath)
-	upManifest := services.ManifestOf(uploadDir)
-	log.Printf("[%d] %s", rid, services.FormatManifestLine(srcManifest, upManifest, cfg.Encrypt))
-	if err := services.CompareManifest(srcManifest, upManifest, cfg.Encrypt); err != nil {
-		var mfErr *services.ManifestError
-		if errors.As(err, &mfErr) {
-			report := mfErr.DetailedReport()
-			log.Printf("[%d] %s", rid, report)
-			// Best-effort: push the full diff to the site so it shows up
-			// on the agent dashboard without anyone needing docker access.
-			// Failure here is non-fatal — the bug still gets surfaced via
-			// FailReason on the request — but log on failure so a silent
-			// PostLog drop doesn't hide the diagnostic from the operator.
-			if perr := site.PostLog("error",
-				fmt.Sprintf("[req %d] %s\n%s", task.RequestID, task.Title, report)); perr != nil {
-				log.Printf("[%d] site.PostLog (manifest-mismatch report) failed: %v", task.RequestID, perr)
-			}
-		}
-		fail("ManifestMismatch", "Manifest check failed — aborting publish", err)
-		return
-	}
-
-	log.Printf("[%d] Step 7: Uploading to Usenet: %.2f MiB via %d connections...",
-		rid, float64(totalUploadSize)/1024/1024, cfg.NNTPConnections)
-	reportProgress("Uploading", fmt.Sprintf("%.1f MiB via %d NNTP connections...",
-		float64(totalUploadSize)/1024/1024, cfg.NNTPConnections))
-
 	services.SetProgressCallbackForJob(jobName, progressCb)
-
-	uploadStart := time.Now()
-	fileSegments, err := services.UploadDirectory(ctx, cfg, uploadDir, task.Title, jobName)
-
-	services.ClearProgressCallbackForJob(jobName)
-
-	if err != nil {
-		fail("Upload", "Upload error", err)
-		return
-	}
-	uploadDur := time.Since(uploadStart)
-	speedMBs := float64(totalUploadSize) / 1024 / 1024 / uploadDur.Seconds()
-	log.Printf("[%d] Step 7: Upload complete: %.2f MiB in %s (%.1f MB/s)",
-		rid, float64(totalUploadSize)/1024/1024, uploadDur.Round(time.Second), speedMBs)
-
-	// ── 8. Generate NZB ────────────────────────────────────────────────────
-	log.Printf("[%d] Step 8: Generating NZB and reporting to site...", rid)
-	reportProgress("Finalizing", "Generating NZB...")
-
-	nzbData, err := services.CreateMultiFileNZBBytes(cfg, fileSegments, password, services.NZBMetaInfo{
-		Title:     task.Title,
-		RequestID: task.RequestID,
+	pub, pubErr := services.PublishDirectory(ctx, services.PublishJob{
+		Cfg:        cfg,
+		JobName:    jobName,
+		Title:      task.Title,
+		RequestID:  task.RequestID,
+		ContentDir: downloadedPath,
+		Describe:   true,
+		Progress:   reportProgress,
+		FileProgress: func(fp *client.FileProgress) {
+			updateTaskProgress(task.RequestID, fp)
+		},
+		PostLog: func(level, msg string) {
+			if perr := site.PostLog(level, msg); perr != nil {
+				log.Printf("[%d] site.PostLog failed: %v", rid, perr)
+			}
+		},
 	})
-	if err != nil {
-		fail("NZB", "NZB error", err)
+	services.ClearProgressCallbackForJob(jobName)
+	if pubErr != nil {
+		// The pipeline names the stage that sank it, so the request lock's
+		// fail_reason keeps the same per-stage labels it always had.
+		var pe *services.PublishError
+		if errors.As(pubErr, &pe) {
+			fail(pe.Step, pe.Msg, pe.Err)
+		} else {
+			fail("Publish", "Publish error", pubErr)
+		}
 		return
 	}
 
@@ -2501,17 +1873,17 @@ func processTask(cfg *config.Config, site client.Site, task *client.AgentTask, r
 		LockID:            task.LockID,
 		RequestID:         task.RequestID,
 		Status:            "completed",
-		NzbData:           nzbData,
-		Password:          password,
-		MediaInfo:         videoInfo,
-		Screenshots:       screenshots,
-		Subtitles:         subtitleUploads,
-		AudioTracks:       audioUploads,
-		AudioFingerprints: fingerprintUploads,
-		DominantPalette:   dominantPalette,
-		OCRText:           ocrResult.Text,
-		OCRLanguage:       ocrResult.Language,
-		PipelineStages:    pipelineStages,
+		NzbData:           pub.NzbData,
+		Password:          pub.Password,
+		MediaInfo:         pub.VideoInfo,
+		Screenshots:       pub.Screenshots,
+		Subtitles:         pub.Subtitles,
+		AudioTracks:       pub.AudioTracks,
+		AudioFingerprints: pub.Fingerprints,
+		DominantPalette:   pub.DominantPalette,
+		OCRText:           pub.OCRText,
+		OCRLanguage:       pub.OCRLanguage,
+		PipelineStages:    pub.Stages,
 	}
 
 	// Retry completion with smart handling for maintenance mode. Normal
@@ -2561,7 +1933,7 @@ func processTask(cfg *config.Config, site client.Site, task *client.AgentTask, r
 	if completeErr != nil {
 		// Save NZB locally as last resort so it's not lost.
 		backupPath := filepath.Join(cfg.TempDir, fmt.Sprintf("backup-request-%d.nzb", task.RequestID))
-		if err := os.WriteFile(backupPath, nzbData, 0644); err == nil {
+		if err := os.WriteFile(backupPath, pub.NzbData, 0644); err == nil {
 			log.Printf("[%d] NZB saved to %s — upload manually if needed", rid, backupPath)
 			site.PostLog("error", fmt.Sprintf("Completion failed for request #%d. NZB saved locally at %s", task.RequestID, backupPath))
 		}
@@ -2573,14 +1945,10 @@ func processTask(cfg *config.Config, site client.Site, task *client.AgentTask, r
 	storage.UpdateState(jobName, "Completed", "Uploaded and reported to site.", 100)
 	recordSuccess()
 
-	// Release the upload slot BEFORE seeding so the next task in the
-	// queue can start uploading immediately. Seeding is BitTorrent
-	// traffic with its own ratio/time budget (up to 1h per task by
-	// default) — holding the NNTP upload mutex through it would
-	// throttle the whole queue to one task per hour. releaseSlot is
-	// idempotent via sync.Once so the deferred path (error returns /
-	// panic / no-seed path) still works without a double-Unlock panic.
-	releaseSlot()
+	// The upload slot is owned by services.PublishDirectory now and was
+	// released when it returned — before the Complete report above, which
+	// lets the next task start its NNTP upload while this one reports.
+	// Seeding below is BitTorrent traffic and never held it.
 
 	// Clear the in-flight progress entry now that the pipeline is
 	// done. The deferred updateTaskProgress(rid, nil) at function entry

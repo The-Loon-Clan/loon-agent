@@ -259,7 +259,14 @@ const layoutHTML = `<!doctype html>
       setText('live-disk-free', d.disk_free_gb.toFixed(1) + ' GB');
     }
     if (typeof d.disk_reserved_gb === 'number') {
-      setText('live-disk-reserved', d.disk_reserved_gb.toFixed(1) + ' GB');
+      // Reserved with a seeding annotation: seed phases hold reservations
+      // after their task leaves the queue, and without the "(N seeding)"
+      // a reserved figure against an empty queue reads as a leak.
+      var reservedText = d.disk_reserved_gb.toFixed(1) + ' GB';
+      if (d.seeding_count > 0) {
+        reservedText += ' (' + d.seeding_count + ' seeding)';
+      }
+      setText('live-disk-reserved', reservedText);
     }
     // Usage bar: compute used% from (total - free - reserved) / total.
     // Stub platforms send disk_total_gb = 0; leave the bar hidden then.
