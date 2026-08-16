@@ -262,6 +262,19 @@ func (s *OfferFulfillService) fulfillOne(ctx context.Context, r client.OfferPend
 	}
 
 	jobName := fmt.Sprintf("offer-%d", rid)
+	// Hand back the disk reservation however this request ends.
+	//
+	// downloadTorrentFile reserves for EVERY caller, and ReleaseDisk was
+	// deferred in only two places — the site-task handler and the offline
+	// processor. This path was the third caller and released nothing, so a
+	// remote fulfilment permanently subtracted ~1.3x the torrent size from
+	// the free space the agent believes it has, for the life of the process.
+	// The counter is in memory, so the symptom is "Reserved N GB" on an agent
+	// with nothing running, and a restart hides it.
+	//
+	// Cheap and safe on the local route too: ReleaseDisk is a no-op for a
+	// jobName that never reserved.
+	defer ReleaseDisk(jobName)
 
 	// 3. Get the bytes into a directory UploadDirectory can walk. Two
 	// routes converge here: a local file is symlinked (or copied) into a
