@@ -7,10 +7,11 @@ package services
 //   1. Look up the local file via hash→path cache (sync-side wrote it).
 //   2. Claim the request (optimistic lock).
 //   3. Stage the file into a fresh temp dir.
-//   4. UploadDirectory pushes to NNTP, returns FileSegments.
-//   5. CreateMultiFileNZBBytes assembles the NZB blob.
-//   6. OfferUploadNZB ships blob + request_id; site dedups + closes.
-//   7. On any failure after claim, /fail the request so it reopens.
+//   4. GeneratePAR2 writes recovery blocks alongside it.
+//   5. UploadDirectory pushes to NNTP, returns FileSegments.
+//   6. CreateMultiFileNZBBytes assembles the NZB blob.
+//   7. OfferUploadNZB ships blob + request_id; site dedups + closes.
+//   8. On any failure after claim, /fail the request so it reopens.
 
 import (
 	"context"
@@ -313,16 +314,39 @@ func (s *OfferFulfillService) fulfillOne(ctx context.Context, r client.OfferPend
 		uploadDir, releaseName = stageDir, filepath.Base(localPath)
 	}
 
-	// 4. Upload to Usenet. Same path the task-driven pipeline uses,
-	// minus the post-download media transforms — for personal-source
-	// fulfillment we ship the bits as-is.
+	// 4. PAR2 recovery, into the same directory the upload walks.
+	//
+	// "We ship the bits as-is" was the Phase-3 note here, and it was fine
+	// while nothing had ever fulfilled. The first real delivery was 14.9 GB
+	// posted with NO recovery blocks: one missing article and the whole
+	// release is unrepairable, with nothing on the release page to say so.
+	// Every other upload path on this agent generates PAR2; this one skipped
+	// it by omission rather than by decision.
+	//
+	// Non-fatal, matching both the online and offline paths: a post without
+	// recovery is worse than one with it and far better than no post at all,
+	// after the download and staging are already paid for.
+	par2Base := SanitizeBaseName(releaseName)
+	if par2Base == "" {
+		par2Base = jobName
+	}
+	if _, err := GeneratePAR2(ctx, uploadDir, par2Base, PAR2Options{
+		Redundancy: s.cfg.PAR2Redundancy,
+		BlockSize:  ChunkSize,
+		Threads:    s.cfg.PAR2Threads,
+		MemoryMB:   s.cfg.PAR2Memory,
+	}, nil); err != nil {
+		log.Printf("[offer-fulfill #%d] PAR2 warning (non-fatal): %v", rid, err)
+	}
+
+	// 5. Upload to Usenet. Same path the task-driven pipeline uses.
 	fileSegments, err := UploadDirectory(ctx, s.cfg, uploadDir, releaseName, jobName)
 	if err != nil {
 		failRequest("upload", err)
 		return
 	}
 
-	// 5. Build the NZB blob with the request id as metadata so the
+	// 6. Build the NZB blob with the request id as metadata so the
 	// site's ingest path can correlate even when the agent name is
 	// the only other hint.
 	nzbData, err := CreateMultiFileNZBBytes(s.cfg, fileSegments, "", NZBMetaInfo{
@@ -334,7 +358,7 @@ func (s *OfferFulfillService) fulfillOne(ctx context.Context, r client.OfferPend
 		return
 	}
 
-	// 6. Ship to the site — single round-trip handles both ingest
+	// 7. Ship to the site — single round-trip handles both ingest
 	// (creates nzbs row) and deliver (closes offer_request).
 	uploadName := releaseName + ".nzb"
 	resp, err := s.site.OfferUploadNZB(rid, uploadName, nzbData, "")
