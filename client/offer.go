@@ -249,6 +249,21 @@ type OfferUploadNZBResponse struct {
 	Delivered bool   `json:"delivered"`
 }
 
+// OfferSidecars is the release description that travels WITH an offer
+// delivery — the same JSON payloads the task path's /complete form carries,
+// produced by the same publish pipeline. All optional; empty fields are
+// omitted from the form and older sites ignore the ones they don't know.
+type OfferSidecars struct {
+	Password              string
+	MediaInfoJSON         string
+	AudioTracksJSON       string
+	AudioFingerprintsJSON string
+	DominantPaletteJSON   string
+	PipelineStagesJSON    string
+	OCRText               string
+	OCRLanguage           string
+}
+
 // OfferUploadNZB ships the .nzb blob this agent produced for a
 // fulfillment + closes the offer_request in one round-trip. The site
 // reuses its bulk-ingest pipeline (dedup on content hash, parse
@@ -258,13 +273,32 @@ type OfferUploadNZBResponse struct {
 // `filename` should be the original media filename + ".nzb" so the
 // title-parser has something to work with. `uploadMode` accepts the
 // same values as /api/bulk/nzb ("" / "normal" / "anonymous" /
-// "true_anonymous"); empty = normal.
-func (c *SiteClient) OfferUploadNZB(requestID int, filename string, nzbData []byte, uploadMode string) (*OfferUploadNZBResponse, error) {
+// "true_anonymous"); empty = normal. sidecars may be nil.
+func (c *SiteClient) OfferUploadNZB(requestID int, filename string, nzbData []byte, uploadMode string, sidecars *OfferSidecars) (*OfferUploadNZBResponse, error) {
 	var body bytes.Buffer
 	w := multipart.NewWriter(&body)
 
 	if err := w.WriteField("request_id", strconv.Itoa(requestID)); err != nil {
 		return nil, err
+	}
+	if sidecars != nil {
+		for field, val := range map[string]string{
+			"password":           sidecars.Password,
+			"media_info":         sidecars.MediaInfoJSON,
+			"audio_tracks":       sidecars.AudioTracksJSON,
+			"audio_fingerprints": sidecars.AudioFingerprintsJSON,
+			"dominant_palette":   sidecars.DominantPaletteJSON,
+			"pipeline_stages":    sidecars.PipelineStagesJSON,
+			"ocr_text":           sidecars.OCRText,
+			"ocr_lang":           sidecars.OCRLanguage,
+		} {
+			if val == "" {
+				continue
+			}
+			if err := w.WriteField(field, val); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if uploadMode != "" {
 		if err := w.WriteField("upload_mode", uploadMode); err != nil {

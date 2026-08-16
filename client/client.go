@@ -1129,6 +1129,24 @@ func (c *SiteClient) uploadScreenshot(nzbID int64, index int, path string) error
 	return c.uploadScreenshotWith(c.http, nzbID, index, path)
 }
 
+// UploadScreenshots ships a batch of screenshot files against an existing
+// release, one POST each, and reports how many landed. Used by the offer
+// fulfiller, whose delivery round-trip returns the nzb_id AFTER the images
+// already exist — the Complete form's inline-screenshot shortcut does not
+// apply there. Failures are logged and skipped: a missing screenshot must
+// never undo a delivery that already happened.
+func (c *SiteClient) UploadScreenshots(nzbID int64, paths []string) int {
+	ok := 0
+	for i, p := range paths {
+		if err := c.uploadScreenshot(nzbID, i, p); err != nil {
+			log.Printf("screenshot upload %d/%d for nzb %d failed: %v", i+1, len(paths), nzbID, err)
+			continue
+		}
+		ok++
+	}
+	return ok
+}
+
 // uploadScreenshotWith is the explicit-client variant used by Complete
 // so the screenshot fallback path inherits the long Complete timeout.
 func (c *SiteClient) uploadScreenshotWith(hc *http.Client, nzbID int64, index int, path string) error {

@@ -1,20 +1,25 @@
 package services
 
 // Offer-fulfill service — polls the site for requests this agent can
-// satisfy and walks them through the claim → upload → deliver flow.
+// satisfy and walks them through the claim → publish → deliver flow.
 //
 // Per request:
-//   1. Look up the local file via hash→path cache (sync-side wrote it).
-//   2. Claim the request (optimistic lock).
-//   3. Stage the file into a fresh temp dir.
-//   4. GeneratePAR2 writes recovery blocks alongside it.
-//   5. UploadDirectory pushes to NNTP, returns FileSegments.
-//   6. CreateMultiFileNZBBytes assembles the NZB blob.
-//   7. OfferUploadNZB ships blob + request_id; site dedups + closes.
-//   8. On any failure after claim, /fail the request so it reopens.
+//  1. Look up the local file via hash→path cache (sync-side wrote it).
+//  2. Claim the request (optimistic lock), kept alive for the whole job.
+//  3. Get the content into a directory (symlink a local file, or download
+//     the remote source).
+//  4. services.PublishDirectory — THE SAME PIPELINE THE TASK PATH RUNS:
+//     metadata + screenshots, staging, archive extraction, PAR2, optional
+//     encryption, the upload slot, the manifest audit, the NNTP upload,
+//     the NZB build.
+//  5. OfferUploadNZB ships blob + request_id + the sidecar description;
+//     the site dedups, closes the request, and pays the escrow.
+//  6. Screenshots + subtitles follow on the per-NZB endpoints.
+//  7. On any failure after claim, /fail the request so it reopens.
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -277,33 +282,34 @@ func (s *OfferFulfillService) fulfillOne(ctx context.Context, r client.OfferPend
 	// jobName that never reserved.
 	defer ReleaseDisk(jobName)
 
-	// 3. Get the bytes into a directory UploadDirectory can walk. Two
-	// routes converge here: a local file is symlinked (or copied) into a
-	// fresh staging dir, while a remote source is downloaded — and the
-	// download's own data directory IS that directory, multi-file torrents
-	// included, so nothing is staged twice.
-	var uploadDir, releaseName string
+	// 3. Get the bytes into a CONTENT directory the publish pipeline can
+	// read. Two routes converge here: a local file is symlinked (or copied)
+	// into a fresh dir, while a remote source is downloaded — the download's
+	// own data directory IS that directory, multi-file torrents included.
+	//
+	// The claim TTL is 15 minutes and neither the download nor the pipeline
+	// (screenshots + PAR2 + a multi-GB NNTP upload behind the shared slot)
+	// is; keep the claim alive for the WHOLE job. The site treats a re-claim
+	// by the holder as an extension.
+	stopKeepalive := s.keepClaimAlive(ctx, rid)
+	defer stopKeepalive()
+	var contentDir, releaseName string
 	if route == fulfillRouteRemote {
-		// The claim TTL is 15 minutes and this download is not; keep the
-		// claim alive for as long as we are genuinely working on it. The
-		// site treats a re-claim by the holder as an extension.
-		stopKeepalive := s.keepClaimAlive(ctx, rid)
 		dir, name, err := s.downloadRemote(ctx, rid, src, jobName)
-		stopKeepalive()
 		if err != nil {
 			failRequest("remote-download", err)
 			return
 		}
 		defer os.RemoveAll(dir)
-		uploadDir, releaseName = dir, name
+		contentDir, releaseName = dir, name
 	} else {
-		stageDir, err := os.MkdirTemp(s.cfg.TempDir, jobName+"-")
+		dir, err := os.MkdirTemp(s.cfg.TempDir, jobName+"-")
 		if err != nil {
 			failRequest("stage-mkdir", err)
 			return
 		}
-		defer os.RemoveAll(stageDir)
-		staged := filepath.Join(stageDir, filepath.Base(localPath))
+		defer os.RemoveAll(dir)
+		staged := filepath.Join(dir, filepath.Base(localPath))
 		if err := os.Symlink(localPath, staged); err != nil {
 			// Symlink not supported (Windows non-admin, exotic FS) — copy.
 			if cerr := copyFile(localPath, staged); cerr != nil {
@@ -311,61 +317,91 @@ func (s *OfferFulfillService) fulfillOne(ctx context.Context, r client.OfferPend
 				return
 			}
 		}
-		uploadDir, releaseName = stageDir, filepath.Base(localPath)
+		contentDir, releaseName = dir, filepath.Base(localPath)
 	}
 
-	// 4. PAR2 recovery, into the same directory the upload walks.
-	//
-	// "We ship the bits as-is" was the Phase-3 note here, and it was fine
-	// while nothing had ever fulfilled. The first real delivery was 14.9 GB
-	// posted with NO recovery blocks: one missing article and the whole
-	// release is unrepairable, with nothing on the release page to say so.
-	// Every other upload path on this agent generates PAR2; this one skipped
-	// it by omission rather than by decision.
-	//
-	// Non-fatal, matching both the online and offline paths: a post without
-	// recovery is worse than one with it and far better than no post at all,
-	// after the download and staging are already paid for.
-	par2Base := SanitizeBaseName(releaseName)
-	if par2Base == "" {
-		par2Base = jobName
-	}
-	if _, err := GeneratePAR2(ctx, uploadDir, par2Base, PAR2Options{
-		Redundancy: s.cfg.PAR2Redundancy,
-		BlockSize:  ChunkSize,
-		Threads:    s.cfg.PAR2Threads,
-		MemoryMB:   s.cfg.PAR2Memory,
-	}, nil); err != nil {
-		log.Printf("[offer-fulfill #%d] PAR2 warning (non-fatal): %v", rid, err)
-	}
-
-	// 5. Upload to Usenet. Same path the task-driven pipeline uses.
-	fileSegments, err := UploadDirectory(ctx, s.cfg, uploadDir, releaseName, jobName)
-	if err != nil {
-		failRequest("upload", err)
-		return
-	}
-
-	// 6. Build the NZB blob with the request id as metadata so the
-	// site's ingest path can correlate even when the agent name is
-	// the only other hint.
-	nzbData, err := CreateMultiFileNZBBytes(s.cfg, fileSegments, "", NZBMetaInfo{
-		Title:     releaseName,
-		RequestID: r.ID,
+	// 4. THE SAME PIPELINE THE TASK PATH RUNS. This path used to re-implement
+	// fragments of it and every stage it lacked was its own incident: the
+	// first real delivery shipped 14.9 GB with no PAR2, the second fix added
+	// PAR2 and nothing else — no screenshots, no media probe, no manifest
+	// audit, no upload slot, no obfuscation or encryption. PublishDirectory
+	// is the whole set, and a stage added there exists here automatically.
+	pub, pubErr := PublishDirectory(ctx, PublishJob{
+		Cfg:        s.cfg,
+		JobName:    jobName,
+		Title:      strings.TrimSuffix(releaseName, filepath.Ext(releaseName)),
+		RequestID:  r.ID,
+		ContentDir: contentDir,
+		Describe:   true,
+		Progress: func(step, detail string) {
+			storage.UpdateState(jobName, step, detail, 0)
+		},
+		PostLog: func(level, msg string) {
+			if perr := s.site.PostLog(level, msg); perr != nil {
+				log.Printf("[offer-fulfill #%d] PostLog failed: %v", rid, perr)
+			}
+		},
 	})
-	if err != nil {
-		failRequest("nzb-build", err)
+	if pubErr != nil {
+		failRequest("publish", pubErr)
 		return
 	}
 
-	// 7. Ship to the site — single round-trip handles both ingest
-	// (creates nzbs row) and deliver (closes offer_request).
+	// 5. Ship to the site — one round-trip handles ingest (creates the nzbs
+	// row), delivery (closes the offer_request), and the sidecar description
+	// the pipeline produced. Password included: an encrypted delivery whose
+	// password never reached the site would be undownloadable.
 	uploadName := releaseName + ".nzb"
-	resp, err := s.site.OfferUploadNZB(rid, uploadName, nzbData, "")
+	resp, err := s.site.OfferUploadNZB(rid, uploadName, pub.NzbData, "", &client.OfferSidecars{
+		Password:              pub.Password,
+		MediaInfoJSON:         marshalJSON(pub.VideoInfo),
+		AudioTracksJSON:       marshalJSON(pub.AudioTracks),
+		AudioFingerprintsJSON: marshalJSON(pub.Fingerprints),
+		DominantPaletteJSON:   marshalJSON(pub.DominantPalette),
+		PipelineStagesJSON:    marshalJSON(pub.Stages),
+		OCRText:               pub.OCRText,
+		OCRLanguage:           pub.OCRLanguage,
+	})
 	if err != nil {
 		failRequest("upload-nzb", err)
 		return
 	}
 	log.Printf("[offer-fulfill #%d] delivered nzb_id=%d status=%s delivered=%v",
 		rid, resp.NzbID, resp.Status, resp.Delivered)
+
+	// 6. Screenshots and subtitles ride the existing per-NZB endpoints, now
+	// that the nzb_id exists. Best-effort by design: the delivery above is
+	// already done, and a failed image must never look like a failed
+	// fulfilment.
+	if resp.NzbID > 0 {
+		if len(pub.Screenshots) > 0 {
+			n := s.site.UploadScreenshots(resp.NzbID, pub.Screenshots)
+			log.Printf("[offer-fulfill #%d] uploaded %d/%d screenshot(s)", rid, n, len(pub.Screenshots))
+		}
+		for _, sub := range pub.Subtitles {
+			sub.NzbID = resp.NzbID
+			if serr := s.site.UploadSubtitle(sub); serr != nil {
+				log.Printf("[offer-fulfill #%d] subtitle upload failed (non-fatal): %v", rid, serr)
+			}
+		}
+	}
+}
+
+// marshalJSON renders a sidecar payload, or "" for nil/empty — the form field
+// is omitted entirely rather than shipping "null" for a release with nothing
+// to describe.
+func marshalJSON(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case *VideoInfo:
+		if t == nil {
+			return ""
+		}
+	}
+	b, err := json.Marshal(v)
+	if err != nil || string(b) == "null" || string(b) == "[]" || string(b) == "{}" {
+		return ""
+	}
+	return string(b)
 }
