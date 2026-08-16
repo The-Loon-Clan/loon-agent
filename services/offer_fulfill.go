@@ -18,6 +18,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/the-loon-clan/loon-agent/client"
@@ -123,14 +124,26 @@ func (s *OfferFulfillService) refreshPublishedPaths() {
 		log.Printf("[offer-fulfill] published-paths refresh failed: %v", err)
 		return
 	}
-	added := 0
+	roots := s.inventoryRoots()
+	added, unresolved := 0, 0
 	for _, r := range rows {
 		if r.OfferHash == "" || r.Path == "" {
 			continue
 		}
+		// The site's path is RELATIVE to one of our roots, and it has never
+		// been told where those are — the same library is a different absolute
+		// path inside this container than on the host. Resolve here, and cache
+		// only what actually exists: a path that fails os.Stat later would
+		// make the loop pick the local route and then abandon the request,
+		// which is strictly worse than admitting we have no route.
+		abs := resolveAgainstRoots(roots, r.Path)
+		if abs == "" {
+			unresolved++
+			continue
+		}
 		// Per-column fill: a bucket reachable BOTH locally and via a tracker
 		// keeps its torrent URL, so this cannot demote a remote route.
-		if err := s.db.UpsertOfferPath(r.OfferHash, r.Path, r.SizeBytes); err != nil {
+		if err := s.db.UpsertOfferPath(r.OfferHash, abs, r.SizeBytes); err != nil {
 			log.Printf("[offer-fulfill] caching %s: %v", shortHash(r.OfferHash), err)
 			continue
 		}
@@ -139,6 +152,58 @@ func (s *OfferFulfillService) refreshPublishedPaths() {
 	if added > 0 {
 		log.Printf("[offer-fulfill] cached %d published path(s) from the site", added)
 	}
+	if unresolved > 0 {
+		// Named loudly: this is an operator problem (a root that moved, or
+		// INVENTORY_ROOTS pointing somewhere the fulfil container cannot see),
+		// and it is invisible from the site side.
+		log.Printf("[offer-fulfill] %d published path(s) matched no root under %v — those offers cannot be served",
+			unresolved, roots)
+	}
+}
+
+// inventoryRoots is where this agent's library lives, by the same rule the
+// inventory reporter uses: INVENTORY_ROOTS if set, else the folder sources
+// already declared in offer.json. One list, because an operator who has told
+// the agent where their library is should not have to say it twice.
+func (s *OfferFulfillService) inventoryRoots() []string {
+	roots := splitRoots(s.cfg.InventoryRoots)
+	if len(roots) > 0 {
+		return roots
+	}
+	if s.loaded == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	for _, src := range s.loaded.Sources {
+		root := strings.TrimSpace(src.Root)
+		if src.Type == "folder" && root != "" && !seen[root] {
+			seen[root] = true
+			roots = append(roots, root)
+		}
+	}
+	return roots
+}
+
+// resolveAgainstRoots returns the first root under which relPath exists, or ""
+// when none does.
+//
+// An absolute path is taken as-is: a future site that stores absolute paths
+// should not have them mangled by a join, and filepath.Join would silently
+// produce nonsense for one.
+func resolveAgainstRoots(roots []string, relPath string) string {
+	if filepath.IsAbs(relPath) {
+		if _, err := os.Stat(relPath); err == nil {
+			return relPath
+		}
+		return ""
+	}
+	for _, root := range roots {
+		candidate := filepath.Join(root, filepath.FromSlash(relPath))
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func (s *OfferFulfillService) fulfillOne(ctx context.Context, r client.OfferPendingRequest) {

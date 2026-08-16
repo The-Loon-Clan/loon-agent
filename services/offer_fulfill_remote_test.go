@@ -1,6 +1,8 @@
 package services
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/the-loon-clan/loon-agent/config"
@@ -90,5 +92,59 @@ func TestBrowserForPrefersSourceOverride(t *testing.T) {
 	}
 	if got := empty.cookiesPath(); got != "" {
 		t.Errorf("cookiesPath with no config = %q, want empty", got)
+	}
+}
+
+// The site's published path is RELATIVE to a root it has never been told
+// about, so resolving it is this side's job. The first cut cached it verbatim:
+// a file at the top of a root has an empty dir_path, so what arrived was a
+// bare filename, the loop saw "a path is present" and chose the local route,
+// then failed os.Stat and skipped. Nothing in the log said why.
+func TestResolveAgainstRoots(t *testing.T) {
+	dir := t.TempDir()
+	nested := filepath.Join(dir, "anime", "show")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	atRoot := filepath.Join(dir, "top.mkv")
+	deep := filepath.Join(nested, "ep01.mkv")
+	for _, p := range []string{atRoot, deep} {
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	other := t.TempDir()
+
+	for _, tc := range []struct {
+		name  string
+		roots []string
+		rel   string
+		want  string
+	}{
+		{"file at the top of a root", []string{dir}, "top.mkv", atRoot},
+		{"nested, forward slashes as the site stores them", []string{dir}, "anime/show/ep01.mkv", deep},
+		// The point of taking a LIST: an operator with two roots should not
+		// have to care which one a given offer came from.
+		{"second root wins", []string{other, dir}, "top.mkv", atRoot},
+		{"absent under every root", []string{other}, "top.mkv", ""},
+		{"no roots configured", nil, "top.mkv", ""},
+		{"absolute path that exists is taken as-is", nil, atRoot, atRoot},
+		{"absolute path that does not exist is refused", nil, filepath.Join(dir, "nope.mkv"), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveAgainstRoots(tc.roots, tc.rel); got != tc.want {
+				t.Errorf("resolveAgainstRoots(%v, %q) = %q, want %q", tc.roots, tc.rel, got, tc.want)
+			}
+		})
+	}
+}
+
+// Caching an unresolvable path is worse than caching nothing: chooseFulfillRoute
+// reads "a local path exists" off the row and commits to the local route, so the
+// request is claimed and then abandoned instead of being left for an agent that
+// can actually serve it.
+func TestUnresolvedPathIsNotCached(t *testing.T) {
+	if got := resolveAgainstRoots([]string{t.TempDir()}, "does/not/exist.mkv"); got != "" {
+		t.Errorf("resolved a missing file to %q", got)
 	}
 }
