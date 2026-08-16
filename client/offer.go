@@ -400,6 +400,43 @@ func (c *SiteClient) OfferPendingRequests() ([]OfferPendingRequest, error) {
 	return out.Requests, nil
 }
 
+// PublishedOfferPath is one bucket this agent's owner has published, with the
+// path this agent itself reported for it.
+type PublishedOfferPath struct {
+	OfferHash string `json:"offer_hash"`
+	Path      string `json:"path"`
+	SizeBytes int64  `json:"size_bytes"`
+}
+
+// OfferPublishedPaths asks the site where our own published files live.
+//
+// Needed because publishing MOVED and fulfilment did not. The fulfil loop
+// resolves a request through the local offer_hash → path cache, and only the
+// folder-scanning sync ever writes to that cache — so an offer the operator
+// published from the site's inventory page is one this agent cannot serve. It
+// logs "no route for hash" and skips, on every tick, forever.
+//
+// The paths are our own scan coming back to us: the site stores what we
+// reported. Nothing here is information we did not send it.
+func (c *SiteClient) OfferPublishedPaths() ([]PublishedOfferPath, error) {
+	resp, err := c.offerGet("/api/agent/offer/published", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.offerError(resp, "published")
+	}
+	var out struct {
+		OK        bool                 `json:"ok"`
+		Published []PublishedOfferPath `json:"published"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("published decode: %w", err)
+	}
+	return out.Published, nil
+}
+
 // ─── shared HTTP helpers ───────────────────────────────────────────
 
 func (c *SiteClient) offerGet(path string, query url.Values) (*http.Response, error) {

@@ -87,6 +87,16 @@ func (s *OfferFulfillService) runOnce(ctx context.Context) {
 		return
 	}
 	log.Printf("[offer-fulfill] %d pending request(s)", len(pending))
+	// Refresh the hash-to-path cache from what the SITE says we published,
+	// before trying to serve anything.
+	//
+	// Publishing moved to the site's inventory page and fulfilment did not:
+	// only the folder-scanning sync writes this cache, so an offer made from
+	// the site is one we cannot serve, and the loop below would log "no route
+	// for hash" for it on every tick forever. Doing it here rather than in the
+	// sync service keeps it next to the code that needs it, and it only costs
+	// a request when there is actually work to do.
+	s.refreshPublishedPaths()
 	for _, r := range pending {
 		if ctx.Err() != nil {
 			return
@@ -98,6 +108,36 @@ func (s *OfferFulfillService) runOnce(ctx context.Context) {
 			continue
 		}
 		s.fulfillOne(ctx, r)
+	}
+}
+
+// refreshPublishedPaths caches where our site-published buckets live locally.
+//
+// Best-effort: a failure leaves the cache as it was, which degrades to the
+// behaviour we already had rather than dropping requests we could serve from
+// offer.json. Reported once per tick, because a call that fails EVERY tick is
+// an agent that silently cannot fulfil anything it published from the site.
+func (s *OfferFulfillService) refreshPublishedPaths() {
+	rows, err := s.site.OfferPublishedPaths()
+	if err != nil {
+		log.Printf("[offer-fulfill] published-paths refresh failed: %v", err)
+		return
+	}
+	added := 0
+	for _, r := range rows {
+		if r.OfferHash == "" || r.Path == "" {
+			continue
+		}
+		// Per-column fill: a bucket reachable BOTH locally and via a tracker
+		// keeps its torrent URL, so this cannot demote a remote route.
+		if err := s.db.UpsertOfferPath(r.OfferHash, r.Path, r.SizeBytes); err != nil {
+			log.Printf("[offer-fulfill] caching %s: %v", shortHash(r.OfferHash), err)
+			continue
+		}
+		added++
+	}
+	if added > 0 {
+		log.Printf("[offer-fulfill] cached %d published path(s) from the site", added)
 	}
 }
 
