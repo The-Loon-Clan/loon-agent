@@ -1137,4 +1137,4 @@ const AgentProtocolVersion = 3
 //	per-file Size + Transferred populated, ProgressCallback
 //	signature carries total/transferred bytes, opt-in cache
 //	hit before DHT.
-const AgentVersion = "1.5.33"
+const AgentVersion = "1.5.34"
