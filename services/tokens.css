@@ -61,4 +61,27 @@
   --slate-tint:       rgba(148, 163, 184, 0.18);
   --teal-tint:        rgba(0, 173, 191, 0.18);
   --orange-tint:      rgba(214, 117, 11, 0.18);
+
+  /* Semantic aliases — the theme vocabulary plugin fragments are
+     migrating to (--primary and friends, from the loon-demo-site theme
+     system). Plugins style against MEANINGS so a host theme can recolour
+     them; this maps those meanings onto the palette above. Without this
+     layer a fragment written against semantic tokens renders on prod
+     with dropped properties and mismatched fallbacks — the messages
+     inbox shipped that way on 2026-08-17 and read as broken. Names and
+     semantics follow the demo's themes/midnight.css commentary. */
+  --primary:             var(--blue);
+  --primary-strong:      var(--blue-hover);
+  --primary-fg:          #ffffff;
+  --primary-tint:        #9ab6f8;                    /* primary readable AS text on dark */
+  --primary-soft:        rgba(91, 138, 245, 0.14);   /* wash behind active/selected */
+  --primary-soft-strong: rgba(91, 138, 245, 0.28);
+  --surface-2:           var(--bg-elevated);         /* raised inside a panel: thead, chips, inputs */
+  --surface-3:           var(--bg-hover);            /* hover / pressed */
+  --text-strong:         #ffffff;
+  --muted:               var(--text-muted);          /* secondary copy */
+  --muted-2:             #5f6878;                    /* tertiary: timestamps, captions, disabled */
+  --danger:              var(--red);
+  --danger-soft:         var(--red-tint);
+  --gutter:              1rem;                       /* page-edge spacing fragments may reference */
 }
