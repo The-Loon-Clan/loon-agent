@@ -183,6 +183,10 @@ type OfferPendingRequest struct {
 	Resolution      string `json:"resolution"`
 	SourceTag       string `json:"source_tag"`
 	SizeBucket      string `json:"size_bucket"`
+	// FileFilter scopes the request to named files inside a folder offer
+	// (site migration 321). Empty means the whole bucket. Names are the
+	// exact file names this agent's own inventory scan reported.
+	FileFilter []string `json:"file_filter,omitempty"`
 }
 
 // OfferClaim takes a request id and tries to lock it for this agent.

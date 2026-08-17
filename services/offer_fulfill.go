@@ -221,6 +221,15 @@ func (s *OfferFulfillService) fulfillOne(ctx context.Context, r client.OfferPend
 		return
 	}
 	route := chooseFulfillRoute(src, s.cfg)
+	// A file-scoped request needs the files ON DISK to pick from. The
+	// remote route downloads a torrent whole; delivering 136 files against
+	// a 40-file request is the wrong delivery, so decline — BEFORE claiming
+	// — and leave it for an offerer who holds the folder locally.
+	if len(r.FileFilter) > 0 && route == fulfillRouteRemote {
+		log.Printf("[offer-fulfill #%d] request is scoped to %d file(s) and only a remote source exists — skipping",
+			rid, len(r.FileFilter))
+		return
+	}
 	switch route {
 	case fulfillRouteNone:
 		log.Printf("[offer-fulfill #%d] no route for hash %s — skipping", rid, shortHash(r.OfferHash))
@@ -309,13 +318,9 @@ func (s *OfferFulfillService) fulfillOne(ctx context.Context, r client.OfferPend
 			return
 		}
 		defer os.RemoveAll(dir)
-		staged := filepath.Join(dir, filepath.Base(localPath))
-		if err := os.Symlink(localPath, staged); err != nil {
-			// Symlink not supported (Windows non-admin, exotic FS) — copy.
-			if cerr := copyFile(localPath, staged); cerr != nil {
-				failRequest("stage-copy", cerr)
-				return
-			}
+		if err := stageLocalContent(localPath, dir, r.FileFilter); err != nil {
+			failRequest("stage", err)
+			return
 		}
 		contentDir, releaseName = dir, filepath.Base(localPath)
 	}
