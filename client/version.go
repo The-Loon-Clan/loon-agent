@@ -40,6 +40,17 @@ const AgentProtocolVersion = 3
 // AgentProtocolVersion's job — but useful for debugging which agents in the
 // field have picked up a release.
 //
+// 1.5.35 — sends the screenshot index. /api/agent/screenshot takes one image
+//	per POST, and the index was tracked all the way to the request and then
+//	dropped on the floor. Every POST therefore arrived as "image 1 of 1" and
+//	the site wrote them all to the same slot: an offer delivery generated six
+//	screenshots and the release kept one. All 25 offer deliveries made before
+//	2026-08-21 have exactly one screenshot on the site. The task path hit it
+//	too, but only when the completion payload was too large to send whole.
+//	The field is optional on the site side, so an older agent still stores
+//	its images — it just gets whichever slot is free rather than the one it
+//	meant.
+//
 // 1.5.33 — describes what it offers. Runs the same ffprobe the upload
 //	pipeline uses over staged files and reports codecs, duration, audio
 //	tracks and subtitle languages, so an offer gets a detail page as
@@ -1137,4 +1148,4 @@ const AgentProtocolVersion = 3
 //	per-file Size + Transferred populated, ProgressCallback
 //	signature carries total/transferred bytes, opt-in cache
 //	hit before DHT.
-const AgentVersion = "1.5.34"
+const AgentVersion = "1.5.35"

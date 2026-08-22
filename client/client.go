@@ -1138,7 +1138,9 @@ func (c *SiteClient) uploadScreenshot(nzbID int64, index int, path string) error
 func (c *SiteClient) UploadScreenshots(nzbID int64, paths []string) int {
 	ok := 0
 	for i, p := range paths {
-		if err := c.uploadScreenshot(nzbID, i, p); err != nil {
+		// 1-based, matching Complete's screenshotFile.index — the site reads
+		// this as the slot now, so an off-by-one is a lost first image.
+		if err := c.uploadScreenshot(nzbID, i+1, p); err != nil {
 			log.Printf("screenshot upload %d/%d for nzb %d failed: %v", i+1, len(paths), nzbID, err)
 			continue
 		}
@@ -1149,8 +1151,13 @@ func (c *SiteClient) UploadScreenshots(nzbID int64, paths []string) int {
 
 // uploadScreenshotWith is the explicit-client variant used by Complete
 // so the screenshot fallback path inherits the long Complete timeout.
+//
+// index is 1-based and IS sent. It used to be discarded here, which meant
+// every POST arrived as "image 1 of 1" and the site wrote them all to the
+// same slot: an offer delivery generates six screenshots and kept one. The
+// site treats the field as optional, so an older agent still stores its
+// images — it just gets whichever slot is free rather than the one it meant.
 func (c *SiteClient) uploadScreenshotWith(hc *http.Client, nzbID int64, index int, path string) error {
-	_ = index // index is kept on the calling side for log labelling only
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -1160,6 +1167,7 @@ func (c *SiteClient) uploadScreenshotWith(hc *http.Client, nzbID int64, index in
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	w.WriteField("nzb_id", fmt.Sprintf("%d", nzbID))
+	w.WriteField("index", fmt.Sprintf("%d", index))
 	if part, err := w.CreateFormFile("screenshot", filepath.Base(path)); err == nil {
 		io.Copy(part, f)
 	}
