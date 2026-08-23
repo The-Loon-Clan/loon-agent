@@ -104,6 +104,15 @@
   --danger:              var(--red);
   --danger-soft:         var(--red-tint);
   --text:                var(--text-primary);        /* body ink, the demo's name for it */
+  --success:             var(--green);
+  /* Role-name ink, the forum plugin's first-choice tokens. Without these
+     its stylesheet falls through to its own defaults and staff names on
+     the forum drift off this site's palette — these are the exact colours
+     theme.css's .role-name-* rules have always used. */
+  --user-tag-admin-fg:       #f472b6;                 /* pink */
+  --user-tag-mod-fg:         #60a5fa;                 /* blue */
+  --user-tag-contributor-fg: #4ade80;                 /* green */
+  --user-tag-member-fg:      #cbd5e1;                 /* slate */
   --info:                var(--teal);                /* teal is this palette's stated info/active accent */
   --info-soft:           var(--teal-tint);
   --gutter:              1rem;                       /* page-edge spacing fragments may reference */
