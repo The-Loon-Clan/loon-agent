@@ -103,5 +103,8 @@
   --muted-2:             #5f6878;                    /* tertiary: timestamps, captions, disabled */
   --danger:              var(--red);
   --danger-soft:         var(--red-tint);
+  --text:                var(--text-primary);        /* body ink, the demo's name for it */
+  --info:                var(--teal);                /* teal is this palette's stated info/active accent */
+  --info-soft:           var(--teal-tint);
   --gutter:              1rem;                       /* page-edge spacing fragments may reference */
 }
