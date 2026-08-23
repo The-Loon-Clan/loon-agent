@@ -20,6 +20,26 @@
   --text-primary: #e2e4ec;
   --text-muted:   #6b7485;
 
+  /* Type scale — one variable per step, shared vocabulary with the
+     loon-demo-site theme system. The values are BYTE-IDENTICAL to the
+     demo's on purpose: the loon-plugins templates are one set of files
+     rendered by both sites, and on 2026-08-23 they were converted onto
+     .fs-* classes (620 inline font-sizes, snapped to this scale) while
+     only the demo defined it — so every converted plugin page on prod
+     (release groups, news, wiki, roadmap, …) silently lost its type
+     sizes. A class used by shared templates must resolve on every host
+     that mounts them. */
+  --fs-3xs: 0.70rem;
+  --fs-2xs: 0.75rem;
+  --fs-xs: 0.80rem;
+  --fs-sm: 0.85rem;
+  --fs-md: 0.90rem;
+  --fs-base: 0.94rem;
+  --fs-lg: 1.00rem;
+  --fs-xl: 1.10rem;
+  --fs-2xl: 1.30rem;
+  --fs-3xl: 1.50rem;
+
   /* Accents */
   --blue:         #5b8af5;
   --blue-hover:   #4070e0;
