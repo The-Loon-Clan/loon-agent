@@ -116,4 +116,17 @@
   --info:                var(--teal);                /* teal is this palette's stated info/active accent */
   --info-soft:           var(--teal-tint);
   --gutter:              1rem;                       /* page-edge spacing fragments may reference */
+  --surface:             var(--bg-surface);          /* panel body, the demo's name for it */
+  --radius-sm:           6px;
+  /* The demo's spacing scale, referenced by shared plugin CSS (the fx-*
+     effect block, plugin chooser chrome). Values are the demo's exactly. */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 14px;
+  --space-8: 16px;
+  --space-9: 20px;
 }
