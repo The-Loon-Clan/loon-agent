@@ -129,4 +129,211 @@
   --space-7: 14px;
   --space-8: 16px;
   --space-9: 20px;
+
+  /* ── components.css bridge ──────────────────────────────────────────
+     Every custom property the vendored components.css reads that this
+     palette did not define, valued from the demo's midnight theme — the
+     closest cousin of this site's dark — with midnight's core names
+     translated onto this palette (--bg → --bg-base, --muted →
+     --text-muted, …) so the components sit on ameNZB's colours rather
+     than midnight navy. Generated mechanically (the var-read set minus
+     the var-defined set); a future components.css re-sync regenerates
+     it the same way instead of hand-diffing. */
+  --accent: var(--primary);
+  --accent-2-tint: var(--info-tint);
+  --accent-soft: var(--primary-soft);
+  --accent-tint: var(--primary-tint);
+  --avatar-fallback-bg: linear-gradient(150deg, hsl(var(--poster-hue) 50% 34%), hsl(calc(var(--poster-hue) + 30) 46% 20%));
+  --bg-sunken: #070a11;
+  --body-bg: var(--bg-base);
+  --body-fg: var(--text);
+  --body-wash: linear-gradient(180deg, rgba(124, 92, 255, 0.05), rgba(124, 92, 255, 0)),
+        radial-gradient(46vw 60vh at 14% 12%, rgba(124, 92, 255, 0.11), rgba(124, 92, 255, 0) 70%),
+        radial-gradient(34vw 46vh at 52% 22%, rgba(124, 92, 255, 0.08), rgba(124, 92, 255, 0) 68%),
+        radial-gradient(40vw 54vh at 86% 60%, rgba(56, 132, 255, 0.05), rgba(56, 132, 255, 0) 66%),
+        radial-gradient(52vw 66vh at 100% 16%, rgba(0, 0, 0, 0.16), rgba(0, 0, 0, 0) 76%);
+  --border-strong: #2e3a58;
+  --button-border-radius: var(--radius);
+  --button-filled-bg: linear-gradient(180deg, transparent 0, var(--primary) 0%, var(--primary-strong) 100%);
+  --button-filled-border: 1px solid var(--primary-strong);
+  --button-filled-fg: var(--primary-fg);
+  --button-outlined-bg: transparent;
+  --button-outlined-border: 1px solid var(--border-strong);
+  --button-outlined-fg: var(--text);
+  --button-text-fg: var(--text-muted);
+  --carousel-gap: 14px;
+  --chip-bg: var(--surface-2);
+  --chip-border: 1px solid var(--border);
+  --chip-fg: var(--text-muted);
+  --code-bg: rgba(110, 118, 129, 0.15);
+  --data-table-cell-font-size: var(--fs-base);
+  --data-table-fg: var(--text);
+  --data-table-padding: var(--space-5) var(--space-6);
+  --data-table-tfoot-border: 2px solid var(--border-strong);
+  --data-table-th-bg: var(--surface-2);
+  --data-table-th-fg: var(--text-muted);
+  --data-table-th-font-size: var(--fs-2xs);
+  --data-table-thead-border: 1px solid var(--border);
+  --data-table-tr-border: 1px solid var(--border);
+  --data-table-tr-even-bg: rgba(255, 255, 255, 0.014);
+  --data-table-tr-hover-bg: var(--surface-2);
+  --data-table-tr-odd-bg: transparent;
+  --featured-inset: 14px;
+  --featured-radius: 16px;
+  --focus-ring: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--primary);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+                 "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei",
+                 "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Yu Gothic", Meiryo,
+                 "Noto Sans CJK SC", "Noto Sans CJK JP", sans-serif;
+  --footer-bg: var(--bg-sunken);
+  --footer-fg: var(--text-muted);
+  --footer-heading-fg: var(--muted-2);
+  --footer-hr-fg: var(--border);
+  --footer-link-fg: var(--text-muted);
+  --footer-link-hover-fg: var(--text-strong);
+  --footer-social-bg: var(--surface-2);
+  --footer-social-fg: var(--text-muted);
+  --footer-social-hover-bg: var(--primary);
+  --footer-social-hover-fg: var(--primary-fg);
+  --info-tint: #7fb0ff;
+  --ink-on-image: rgba(255, 255, 255, 0.92);
+  --ink-on-image-muted: rgba(255, 255, 255, 0.62);
+  --input-bg: var(--surface-2);
+  --input-border: 1px solid var(--border);
+  --input-border-active: 1px solid var(--primary);
+  --input-border-hover: 1px solid var(--border-strong);
+  --input-border-radius: var(--radius-sm);
+  --input-fg: var(--text);
+  --input-placeholder-fg: var(--muted-2);
+  --key-value-border-radius: var(--radius-sm);
+  --key-value-even-bg: rgba(255, 255, 255, 0.02);
+  --key-value-fg: var(--text);
+  --key-value-odd-bg: transparent;
+  --key-value-padding: var(--space-6);
+  --label-fg: var(--text-muted);
+  --link-fg: var(--info-tint);
+  --link-hover-fg: var(--text-strong);
+  --list-row-padding: var(--space-5) var(--space-8);
+  --meta-chip-name-fg: var(--muted-2);
+  --meta-chip-value-fg: var(--text);
+  --paginate-bg: var(--surface-2);
+  --paginate-bg-current: var(--primary-soft-strong);
+  --paginate-bg-hover: var(--surface-3);
+  --paginate-border-radius: var(--radius);
+  --paginate-fg: var(--text);
+  --paginate-fg-disabled: var(--muted-2);
+  --panel-action-fg: var(--text-muted);
+  --panel-bg: var(--surface);
+  --panel-body-font-size: var(--fs-lg);
+  --panel-body-padding: var(--space-9);
+  --panel-border: 1px solid var(--border);
+  --panel-border-radius: var(--radius-lg);
+  --panel-box-shadow: var(--shadow);
+  --panel-fg: var(--text);
+  --panel-group-fg: var(--muted-2);
+  --panel-head-bg: transparent;
+  --panel-head-border: 1px solid var(--border);
+  --panel-head-fg: var(--text-strong);
+  --panel-head-min-height: 56px;
+  --panel-head-padding-block: 0;
+  --panel-head-padding-inline: var(--space-8);
+  --panel-heading-font-size: var(--fs-xl);
+  --panel-heading-padding-block: var(--space-7);
+  --panel-heading-tracking: 0.06em;
+  --panel-heading-transform: uppercase;
+  --panel-heading-weight: 700;
+  --pill-bg: var(--surface-2);
+  --pill-border: 1px solid var(--border);
+  --pill-fg: var(--text);
+  --pill-hover-bg: var(--surface-3);
+  --poster-bg: var(--surface-2);
+  --poster-fallback-bg: linear-gradient(115deg, var(--sheen) 0%, transparent 42%),
+        radial-gradient(120% 80% at 22% 6%, hsl(var(--poster-hue) 62% 38% / 0.9) 0%, transparent 62%),
+        linear-gradient(160deg, hsl(var(--poster-hue) 48% 24%) 0%, hsl(calc(var(--poster-hue) + 26) 44% 12%) 100%);
+  --poster-hue: 265;
+  --poster-radius: var(--radius);
+  --poster-w: 172px;
+  --quick-info-bg: #141b2b;
+  --quick-info-border: 1px solid #26314a;
+  --quick-info-fg: var(--text);
+  --quick-info-label-fg: var(--text-muted);
+  --quick-info-radius: var(--radius-lg);
+  --quick-info-shadow: var(--shadow-lg);
+  --quick-search-bg: var(--surface-2);
+  --quick-search-border: 1px solid var(--border);
+  --quick-search-border-radius: var(--radius-pill);
+  --quick-search-box-shadow: 0 0 0 3px var(--primary-soft);
+  --quick-search-fg: var(--text);
+  --quick-search-hotkey-bg: var(--surface-3);
+  --quick-search-hotkey-fg: var(--text-muted);
+  --quick-search-placeholder-fg: var(--muted-2);
+  --radius: 10px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+  --rank-1-bg: rgba(234, 166, 64, 0.18);
+  --rank-1-fg: #f0be6d;
+  --rank-2-bg: rgba(176, 190, 214, 0.16);
+  --rank-2-fg: #c3cede;
+  --rank-3-bg: rgba(196, 122, 74, 0.18);
+  --rank-3-fg: #d79466;
+  --rank-chip-bg: var(--surface-3);
+  --rank-chip-fg: var(--text-muted);
+  --scrim: rgba(0, 0, 0, 0.35);
+  --scrollbar-thumb: #26314c;
+  --scrollbar-track: transparent;
+  --secondary-nav-bg: #0b1120;
+  --secondary-nav-box-shadow: inset 0 -1px 0 var(--border);
+  --secondary-nav-tab-active-fg: var(--text-strong);
+  --secondary-nav-tab-active-underline: var(--primary);
+  --secondary-nav-tab-bg: transparent;
+  --secondary-nav-tab-fg: var(--text-muted);
+  --secondary-nav-tab-hover-bg: transparent;
+  --secondary-nav-tab-hover-fg: var(--text);
+  --secondary-nav-tab-padding: var(--space-6) var(--space-7);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.45), 0 10px 26px -14px rgba(0, 0, 0, 0.85);
+  --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.4), 0 24px 48px -20px rgba(0, 0, 0, 0.9);
+  --stat-strip-bg: rgba(255, 255, 255, 0.018);
+  --stat-strip-border: 1px solid var(--border);
+  --stat-strip-icon-fg: var(--primary-tint);
+  --stat-strip-label-fg: var(--muted-2);
+  --stat-strip-value-fg: var(--text);
+  --success-soft: color-mix(in srgb, var(--success) 32%, transparent);
+  --top-nav-badge-bg: var(--danger);
+  --top-nav-badge-fg: #fff;
+  --top-nav-bg: #0c1220;
+  --top-nav-border: 1px solid var(--border);
+  --top-nav-box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 10px 24px -18px #000;
+  --top-nav-dropdown-menu-bg: #131b2c;
+  --top-nav-dropdown-menu-border: 1px solid var(--border-strong);
+  --top-nav-dropdown-menu-border-radius: var(--radius);
+  --top-nav-dropdown-menu-box-shadow: var(--shadow-lg);
+  --top-nav-dropdown-menu-item-fg: var(--text);
+  --top-nav-dropdown-menu-item-hover-bg: var(--surface-3);
+  --top-nav-dropdown-menu-item-icon-fg: var(--text-muted);
+  --top-nav-icon-bar-icon-bg: var(--surface-2);
+  --top-nav-icon-bar-icon-border-radius: var(--radius);
+  --top-nav-icon-bar-icon-fg: var(--text-muted);
+  --top-nav-icon-bar-icon-hover-bg: var(--surface-3);
+  --top-nav-icon-bar-icon-hover-fg: var(--text-strong);
+  --top-nav-tagline-fg: var(--muted-2);
+  --torrent-card-bg: var(--surface);
+  --torrent-card-border: 1px solid var(--border);
+  --torrent-card-fg: var(--text);
+  --torrent-card-head-bg: var(--surface-2);
+  --torrent-card-head-fg: var(--text-muted);
+  --transition-fast: 150ms;
+  --user-tag-banned-fg: #888f9e;
+  --warning: #eaa640;
+  --warning-soft: color-mix(in srgb, var(--warning) 32%, transparent);
+  --wordmark-accent-fg: #9f95cf;
+  --wordmark-fg: #e8e8f2;
+  --wordmark-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  --z-dropdown: 1000;
+  --z-modal: 2000;
+  --z-overlay: 2;
+  --sheen: rgba(255, 255, 255, 0.08);
+  /* Read by one components rule and defined by no demo theme either;
+     none keeps it a defined no-op. */
+  --backdrop: none;
 }
