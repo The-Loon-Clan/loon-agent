@@ -4,9 +4,16 @@
    //go:embed). Keep the two copies byte-identical; the agent doesn't
    share a filesystem with the site so we literally copy on change.
    This is also why this file has no @layer or :where() wrapping — any
-   feature we use has to survive being served by a separate binary. */
+   feature we use has to survive being served by a separate binary.
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Ubuntu:wght@400;500;700&display=swap');
+   The font FACES are deliberately not loaded here (2026-08-24). The
+   Google Fonts @import that lived on the next line handed every
+   visitor's IP to Google on every page view, and an import URL cannot
+   carry the content-version query that gets CSS deploys past the CDN's
+   browser-TTL rewrite. The site links /static/vendor/fonts.css (the
+   vendored faces) from site-head, before this file; the agent's local
+   UI adds its own import in agent-shell.css, where the fetch is the
+   operator's own machine talking to Google, not a member's. */
 
 :root {
   /* Surfaces */

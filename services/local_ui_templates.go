@@ -26,6 +26,13 @@ const layoutHTML = `<!doctype html>
 <link rel="icon" href="data:,"> {{/* suppress favicon 404 without shipping one */}}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+{{/* The faces, fetched from Google HERE and not in tokens.css: the site
+     vendored its fonts on 2026-08-24 (a member's page view should not
+     hand their IP to Google) and the shared tokens.css dropped its
+     @import in that change. This UI is the operator's own machine, so
+     the fetch stays — embedding 600KB of woff2 in the agent binary
+     bought nothing. */}}
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Ubuntu:wght@400;500;700&display=swap">
 {{/* Load order: tokens (palette) → shared components (.dot/.alert)
      → agent-shell primitives (.local-shell-scoped cards/rows/bars)
      → agent-specific layout. All four baked into the binary via
