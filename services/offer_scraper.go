@@ -66,6 +66,18 @@ type ScraperRunConfig struct {
 	// tracker domain when they need auth.
 	Browser     string
 	CookiesPath string
+	// StartOffset is where a paging scraper resumes its catalog walk —
+	// the persisted cursor from the previous tick, 0 for a fresh walk.
+	// Single-fetch scrapers (Nyaa's RSS) ignore it.
+	StartOffset int
+}
+
+// resumableScraper is the optional face of a scraper that walks a paged
+// catalog across ticks. After Scan the orchestrator persists NextOffset
+// under the source's short_name; 0 means the walk completed and the next
+// tick starts over from the newest.
+type resumableScraper interface {
+	NextOffset() int
 }
 
 // ScraperConstructor builds a scraper instance for one source. Returns

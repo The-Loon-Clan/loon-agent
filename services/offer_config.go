@@ -60,6 +60,35 @@ type OfferSource struct {
 	Browser    string   `json:"browser"`    // scraper mode per-source override
 	Categories []string `json:"categories"` // scraper mode
 
+	// Scraper picks the IMPLEMENTATION when it differs from the tracker's
+	// identity. The registry was keyed by short_name back when every
+	// tracker needed bespoke code; "torznab" broke that — one
+	// implementation, any tracker behind a Prowlarr/Jackett/native Torznab
+	// endpoint. Empty falls back to ShortName, which keeps every existing
+	// config working.
+	Scraper string `json:"scraper"`
+	// TorznabURL is the feed base up to and including /api — paste the
+	// "Torznab feed" URL Prowlarr shows for the indexer (e.g.
+	// http://localhost:9696/8/api). The scraper appends t=search, paging
+	// and the key itself.
+	TorznabURL string `json:"torznab_url"`
+	// APIKey authenticates the Torznab endpoint (Prowlarr's key, or the
+	// tracker's own for a native feed). Lives here, agent-side, on the
+	// operator's machine — the site never sees it.
+	APIKey string `json:"api_key"`
+	// CategoryIDs narrows the walk to Torznab category numbers (5070 =
+	// TV/Anime, etc.). Empty walks everything the endpoint returns.
+	CategoryIDs []int `json:"category_ids"`
+	// PageDelaySeconds is the pause between feed pages. Every page is a
+	// live search against the tracker behind the proxy, so the default
+	// (20s) errs polite; the site's per-tracker scrape_min_seconds is the
+	// operator's reference for tuning it down.
+	PageDelaySeconds int `json:"page_delay_seconds"`
+	// MaxPagesPerTick bounds one sync tick's walk (default 10). The
+	// cursor persists in the agent DB, so a large catalog is covered
+	// across ticks rather than hammered in one.
+	MaxPagesPerTick int `json:"max_pages_per_tick"`
+
 	// DownloadsRoot pairs with scraper sources: it points at the
 	// local folder where this tracker's downloads land (qBittorrent
 	// save dir, watch_folder DoneDir, etc.). The sync orchestrator

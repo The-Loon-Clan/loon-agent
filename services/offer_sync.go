@@ -137,7 +137,8 @@ func (s *OfferSyncService) syncOne(ctx context.Context, src OfferSource) error {
 // syncScraper runs a tracker scrape + optionally pairs against a
 // local downloads folder for fulfillment readiness:
 //
-//  1. Look up the scraper in the registry by src.ShortName.
+//  1. Look up the implementation in the registry — src.Scraper when set
+//     (the generic torznab scraper), else src.ShortName (bespoke ones).
 //  2. Construct + Scan — gets the remote release list.
 //  3. If src.DownloadsRoot is set, walk it and match scraped
 //     releases to local files by normalised filename.
@@ -153,10 +154,19 @@ func (s *OfferSyncService) syncOne(ctx context.Context, src OfferSource) error {
 // info_hash flows through to UpsertOffer so the fulfill loop's
 // auto-resolve path lights up for tracker-sourced offers.
 func (s *OfferSyncService) syncScraper(ctx context.Context, src OfferSource) error {
-	ctor := LookupScraper(src.ShortName)
+	// The implementation key and the tracker identity are separate axes
+	// since torznab: one generic scraper serves any tracker behind a
+	// Torznab endpoint, while the source's short_name still names the
+	// tracker row on the site. Bespoke scrapers keep the old spelling
+	// where the two coincide.
+	implKey := src.Scraper
+	if implKey == "" {
+		implKey = src.ShortName
+	}
+	ctor := LookupScraper(implKey)
 	if ctor == nil {
-		log.Printf("[offer] source %s — no scraper registered (have: %v)",
-			src.ShortName, RegisteredScrapers())
+		log.Printf("[offer] source %s — no scraper registered for %q (have: %v)",
+			src.ShortName, implKey, RegisteredScrapers())
 		return nil
 	}
 	run := ScraperRunConfig{
@@ -165,11 +175,27 @@ func (s *OfferSyncService) syncScraper(ctx context.Context, src OfferSource) err
 		Browser:      s.loaded.DefaultBrowser,
 		CookiesPath:  s.loaded.CookiesFile,
 	}
+	if s.db != nil {
+		if off, err := s.db.GetScrapeCursor(src.ShortName); err == nil {
+			run.StartOffset = off
+		} else {
+			log.Printf("[offer] source %s: cursor read failed (walking from 0): %v", src.ShortName, err)
+		}
+	}
 	scraper, err := ctor(src, run)
 	if err != nil {
 		return fmt.Errorf("scraper init: %w", err)
 	}
 	releases, err := scraper.Scan()
+	// Park the cursor BEFORE handling the error: a paging scraper that
+	// failed mid-walk still reports where it got to, and losing that
+	// position on error would restart a big catalog from zero every time
+	// the tracker hiccups.
+	if rs, ok := scraper.(resumableScraper); ok && s.db != nil {
+		if cerr := s.db.SetScrapeCursor(src.ShortName, rs.NextOffset()); cerr != nil {
+			log.Printf("[offer] source %s: cursor save failed: %v", src.ShortName, cerr)
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("scraper scan: %w", err)
 	}
@@ -248,6 +274,13 @@ func (s *OfferSyncService) syncScraper(ctx context.Context, src OfferSource) err
 					log.Printf("[offer] cache source failed for %s: %v", rel.RawTitle, err)
 				}
 			}
+			// The kind is the local pairing's verdict: a file on disk is
+			// a "have"; a release only seen on the tracker is a
+			// "can_get" — fulfillable, but fetch-then-upload.
+			kind := client.OfferKindCanGet
+			if localPath != "" {
+				kind = client.OfferKindHave
+			}
 			entries = append(entries, client.OfferEntry{
 				EntityType:    resolved[k].EntityType,
 				EntityID:      resolved[k].EntityID,
@@ -258,6 +291,7 @@ func (s *OfferSyncService) syncScraper(ctx context.Context, src OfferSource) err
 				SizeBucket:    SizeBucket(sizeBytes),
 				InfoHash:      rel.InfoHash,
 				DeliveryModes: deliveryModes,
+				Kind:          kind,
 			})
 		}
 		if len(entries) == 0 {
@@ -433,6 +467,8 @@ func (s *OfferSyncService) syncFolder(ctx context.Context, src OfferSource) erro
 				SourceTag:     srcLower,
 				SizeBucket:    SizeBucket(r.SizeBytes),
 				DeliveryModes: deliveryModes,
+				// A folder scan is by definition a file in hand.
+				Kind: client.OfferKindHave,
 			})
 		}
 		if len(entries) == 0 {

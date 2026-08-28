@@ -29,6 +29,16 @@ type OfferHealthResponse struct {
 	Scopes  []string `json:"scopes"`
 }
 
+// Offer kinds — which promise a registered offer makes. Mirror the site's
+// models.OfferKind* values; the wire carries the string.
+const (
+	// OfferKindHave: the file is on this agent's disk.
+	OfferKindHave = "have"
+	// OfferKindCanGet: seen on the source tracker; the agent would fetch
+	// it before uploading.
+	OfferKindCanGet = "can_get"
+)
+
 // OfferEntry is the agent-side payload row in the bulk register call.
 // Matches the site handler's expected JSON shape exactly — field
 // renames here break agent ↔ site compatibility.
@@ -43,6 +53,10 @@ type OfferEntry struct {
 	Points        int      `json:"points"`                   // 0 = free
 	InfoHash      string   `json:"info_hash,omitempty"`      // 40-char SHA-1 of .torrent info dict; empty for folder sources
 	DeliveryModes []string `json:"delivery_modes,omitempty"` // ["torrent"] default if empty server-side
+	// Kind is OfferKindHave / OfferKindCanGet. omitempty keeps the wire
+	// compatible with a site predating migration 338, which treats
+	// absence as 'have' — the only thing agents could register back then.
+	Kind string `json:"kind,omitempty"`
 }
 
 // OfferRegisterResponse — accepted/submitted counts. The site silently

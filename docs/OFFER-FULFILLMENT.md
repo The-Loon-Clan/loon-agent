@@ -1,7 +1,9 @@
 # Offer fulfillment
 
 How the agent turns "somebody requested a release I offered" into a delivered
-NZB. Two routes, one pipeline.
+NZB. Two routes, one pipeline. How offers get REGISTERED in the first place —
+folder scans, tracker scrapers, the torznab source — is
+[OFFER-SOURCES.md](OFFER-SOURCES.md).
 
 ## The routes
 
