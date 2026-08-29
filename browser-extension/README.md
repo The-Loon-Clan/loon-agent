@@ -41,6 +41,21 @@ Click the extension icon:
 
 **Save**, then **Sync now**. Each domain shows how many cookies it sent.
 
+## Rip this page
+
+Open a tracker's listing (search results, latest, a category page) and click
+**Rip current page**. The extension reads the release list off that page —
+every magnet / `.torrent` / download link and the release name beside it — and
+shows you the ones you have **not seen before** on that domain. The seen list
+is stored locally per domain, so each rip surfaces only what is new since your
+last one. **Reset seen** clears it for the current domain.
+
+Nothing leaves your browser here — the rip is a local "what's new" list, not a
+push. (Cookie sync is the only thing that talks to the site.) It reads whatever
+page is in the active tab, so it works on any tracker without per-site setup;
+the title heuristic takes the longest link text in each row, which is the
+release name on essentially every tracker layout.
+
 ## On the agent side
 
 The agent pulls its jars from `GET /api/agent/cookies` and writes them into

@@ -28,8 +28,13 @@
   .hint { font-size: 11px; color: #6b7485; margin-top: 2px; }
   #status { margin-top: 10px; font-size: 12px; }
   .ok { color: #22c55e; } .bad { color: #f87171; } .muted { color: #6b7485; }
-  .line { display: flex; justify-content: space-between; padding: 2px 0; }
+  .line { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+  .clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   code { font-family: ui-monospace, monospace; }
+  hr { border: none; border-top: 1px solid #2a2d37; margin: 14px 0 4px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #6b7485; margin: 8px 0 2px; }
+  .riplist { margin-top: 6px; max-height: 180px; overflow-y: auto; }
+  .riprow { font-family: ui-monospace, monospace; font-size: 11px; padding: 3px 0; border-bottom: 1px solid #22252e; }
 </style>
 </head>
 <body>
@@ -55,6 +60,16 @@
   </div>
 
   <div id="status" class="muted">Loading…</div>
+
+  <hr>
+  <h2>Rip this page</h2>
+  <div class="hint">Reads the release list off the tracker page in the active tab, and shows the ones you haven't seen before.</div>
+  <div class="row">
+    <button id="rip" class="primary">Rip current page</button>
+    <button id="ripforget">Reset seen</button>
+  </div>
+  <div id="ripstatus" class="muted" style="margin-top:8px;"></div>
+  <div id="riplist" class="riplist"></div>
 
   <script src="popup.js"></script>
 </body>
