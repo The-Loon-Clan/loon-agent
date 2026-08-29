@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "loon cookie bridge",
+  "version": "1.0.0",
+  "description": "Sends your private-tracker session cookies to your loon agent, so a headless agent can scrape and fetch on your behalf without you exporting cookies by hand.",
+  "permissions": ["cookies", "storage", "alarms"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "loon cookie bridge"
+  },
+  "icons": { "128": "icon128.png" }
+}

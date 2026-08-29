@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/the-loon-clan/loon-agent/config"
 	"github.com/google/uuid"
+	"github.com/the-loon-clan/loon-agent/config"
 	"io"
 	"log"
 	"mime/multipart"
@@ -1241,6 +1241,7 @@ func (c *SiteClient) UploadSubtitle(s SubtitleUpload) error {
 //   - No positive log on success, so an operator couldn't tell
 //     "subtitle uploaded but DB store failed" from "subtitle never
 //     left the agent"
+//
 // All three now hard-fail with context. Caller already logs the
 // returned error as WARN — that visibility is now accurate.
 func (c *SiteClient) uploadSubtitleWith(hc *http.Client, s SubtitleUpload) error {
@@ -1288,4 +1289,37 @@ func (c *SiteClient) uploadSubtitleWith(hc *http.Client, s SubtitleUpload) error
 	log.Printf("subtitle upload: OK nzb_id=%d track=%d lang=%s wrote %d bytes in %s",
 		s.NzbID, s.TrackIndex, s.Language, bytesWritten, time.Since(startedAt).Round(time.Millisecond))
 	return nil
+}
+
+// CookieJars fetches the operator's browser-pushed tracker cookie jars from
+// GET /api/agent/cookies. The response is domain -> name -> value, decrypted
+// server-side for this token's own user. Empty (or a 404) means the operator
+// has not installed the cookie-bridge extension, which is the common case —
+// the caller treats it as "no jars" and proceeds.
+func (c *SiteClient) CookieJars() (map[string]map[string]string, error) {
+	req, err := http.NewRequest("GET", c.baseURL+"/api/agent/cookies", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return nil, fmt.Errorf("cookie jars fetch returned %d: %s", resp.StatusCode, body)
+	}
+	var out struct {
+		OK   bool                         `json:"ok"`
+		Jars map[string]map[string]string `json:"jars"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.Jars, nil
 }

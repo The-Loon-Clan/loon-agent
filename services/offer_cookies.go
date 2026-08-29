@@ -65,3 +65,26 @@ func CookieHeader(cookies map[string]string) string {
 	}
 	return strings.Join(parts, "; ")
 }
+
+// WriteCookieJar persists a full domain -> name -> value jar to `path`,
+// atomically (write temp + rename), matching the schema LoadCookies reads.
+// It REPLACES the file: the site is the source of truth for browser-pushed
+// jars, and a merge would silently keep a domain the operator has since
+// logged out of. `path` empty is a no-op.
+func WriteCookieJar(path string, jar map[string]map[string]string) error {
+	if path == "" {
+		return nil
+	}
+	if jar == nil {
+		jar = map[string]map[string]string{}
+	}
+	body, err := json.MarshalIndent(jar, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, body, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}

@@ -113,6 +113,12 @@ func (s *OfferSyncService) runOnce(ctx context.Context) {
 	if len(s.loaded.Sources) == 0 {
 		return
 	}
+	// Refresh tracker cookies from the site FIRST, so a scrape this tick
+	// uses the freshest session the operator's browser has pushed. Best
+	// effort: no jars (extension not installed) or a fetch error just
+	// leaves the on-disk jar as it was, and the scrapers fall back to
+	// whatever cookies_file already held.
+	s.refreshCookieJars(ctx)
 	for i, src := range s.loaded.Sources {
 		if ctx.Err() != nil {
 			return
@@ -121,6 +127,34 @@ func (s *OfferSyncService) runOnce(ctx context.Context) {
 			log.Printf("[offer] source #%d (%s/%s): %v", i, src.Type, src.ShortName, err)
 		}
 	}
+}
+
+// refreshCookieJars pulls the operator's browser-pushed cookie jars and
+// writes them into every distinct cookies_file the sources declare. The
+// browser extension (browser-extension/) is the producer; this is the
+// consumer that turns a headless agent's stale jar into a live one without
+// the operator ever exporting cookies by hand.
+func (s *OfferSyncService) refreshCookieJars(ctx context.Context) {
+	// cookies_file is one shared jar for every source (offer_config.go), so
+	// there is a single file to keep fresh. Empty means the operator opted
+	// out of the bridge; nothing to write.
+	path := s.loaded.CookiesFile
+	if path == "" {
+		return
+	}
+	jars, err := s.site.CookieJars()
+	if err != nil {
+		log.Printf("[offer] cookie refresh skipped: %v", err)
+		return
+	}
+	if jars == nil {
+		return // extension not installed — leave the on-disk jar untouched
+	}
+	if err := WriteCookieJar(path, jars); err != nil {
+		log.Printf("[offer] cookie jar write %s: %v", path, err)
+		return
+	}
+	log.Printf("[offer] refreshed cookie jar %s from the site (%d domains)", path, len(jars))
 }
 
 func (s *OfferSyncService) syncOne(ctx context.Context, src OfferSource) error {
